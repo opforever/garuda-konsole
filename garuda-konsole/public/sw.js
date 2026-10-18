@@ -3,16 +3,16 @@
    notifications even with the browser fully closed. */
 'use strict';
 
-const CACHE = 'garuda-konsole-v5.3.2';
+const CACHE = 'garuda-konsole-v5.3.3';
 const SHELL = [
     '/',
     '/index.html',
     /* Versioned asset URLs: a stale service worker from an older release can
        never have these in cache, so the first load after a deploy fetches the
        fresh CSS/JS from the network instead of resurrecting old styles. */
-    '/style.css?v=5.3.2',
-    '/app.js?v=5.3.2',
-    '/ui.js?v=5.3.2',
+    '/style.css?v=5.3.3',
+    '/app.js?v=5.3.3',
+    '/ui.js?v=5.3.3',
     '/manifest.webmanifest',
     '/replay.html',
     '/icons/icon.svg',

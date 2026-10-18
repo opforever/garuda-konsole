@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-    <link rel="stylesheet" href="style.css?v=5.3.2" />
+    <link rel="stylesheet" href="style.css?v=5.3.3" />
 </head>
 <body>
 
@@ -207,6 +207,7 @@
             <button class="icon-btn" data-action="share" title="Live share"><svg class="ic"><use href="#i-users"></use></svg></button>
             <button class="icon-btn" data-action="files" title="File manager"><svg class="ic"><use href="#i-folder"></use></svg></button>
             <button class="icon-btn" data-action="stats" title="System monitor"><svg class="ic"><use href="#i-activity"></use></svg></button>
+            <button class="icon-btn" data-action="rd-open" title="Remote Desktop — stream & control this machine"><svg class="ic"><use href="#i-monitor"></use></svg></button>
             <span class="tb-divider"></span>
             <button class="icon-btn" id="split-btn" data-action="split-cycle" title="Split view (Alt+S)"><svg class="ic"><use href="#i-split"></use></svg></button>
             <button class="icon-btn" id="record-btn" data-action="record-toggle" title="Record active tab output"><svg class="ic"><use href="#i-record"></use></svg></button>
@@ -1100,6 +1101,7 @@
         <div class="more-grid" id="more-grid">
             <button class="more-tile" data-action="share"><svg class="ic"><use href="#i-users"></use></svg><span>Share</span></button>
             <button class="more-tile" data-action="stats"><svg class="ic"><use href="#i-activity"></use></svg><span>Monitor</span></button>
+            <button class="more-tile" data-action="rd-open"><svg class="ic"><use href="#i-monitor"></use></svg><span>Remote</span></button>
             <button class="more-tile" data-action="clear"><svg class="ic"><use href="#i-refresh"></use></svg><span>Clear</span></button>
             <button class="more-tile" data-action="altlock"><svg class="ic"><use href="#i-download"></use></svg><span>Alt Lock</span></button>
             <button class="more-tile" data-action="upload"><svg class="ic"><use href="#i-upload"></use></svg><span>Upload</span></button>
@@ -1444,7 +1446,7 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
-<script src="app.js?v=5.3.2"></script>
-<script src="ui.js?v=5.3.2"></script>
+<script src="app.js?v=5.3.3"></script>
+<script src="ui.js?v=5.3.3"></script>
 </body>
 </html>

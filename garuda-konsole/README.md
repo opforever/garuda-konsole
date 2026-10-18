@@ -1,8 +1,8 @@
-# Garuda Konsole 5.3.2 🦅
+# Garuda Konsole 5.3.3 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.3.2-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-460%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.3.3-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-460%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,10 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 🖥️ What's new in 5.3.3 — Remote Desktop gets a front door
+
+Discoverability: a **monitor-icon toolbar button** (desktop) and a **"Remote" tile** in the mobile more-sheet now open the Remote Desktop drawer directly — no palette digging. Palette entries and `Remote Desktop: connect` remain. Version lockstep 5.3.3; suite green (188/272/statics).
 
 ## 🩹 What's new in 5.3.2 — stale-socket-proof setup + self-healing input
 
