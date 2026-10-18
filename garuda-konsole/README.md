@@ -1,8 +1,8 @@
-# Garuda Konsole 5.1.5 🦅
+# Garuda Konsole 5.1.6 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.1.5-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-383%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.1.6-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-388%20passing-2fd07a)
 
 ---
 
@@ -210,6 +210,21 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🎨 What's new in 5.1.6 — the right-click menu finally looks clickable
+
+Real-world bug report: *"the buttons that appear when you right click the screen are still grayed out even though they still work."*
+
+Two root causes, both closed:
+
+- **Gray in engines without `color-mix()`.** The 5.1.4 idle-brightening blends with `color-mix()`; engines without it (older WebViews/Safari) fell back to `var(--text-dim)` — the literal grayed-out look — on every menu entry. Context-menu items now idle in the theme's **full `--text` color** (no blend, no fallback trap): crisp in every engine, all 26 built-in themes and custom JSON themes. Destructive entries idle in the danger hue so their intent reads at a glance; keyboard hints were lifted from `--text-faint` to `--text-dim`.
+- **"Disabled" that wasn't.** Inert entries were faked with inline `opacity:.4; pointer-events:none` on *live* buttons. `openCtxMenu()` now sets the native `disabled` attribute — the browser makes them truly inert and the AFFORDANCE `:disabled` rule styles them (dimmed, desaturated, `not-allowed`). **Gray now always means off; everything that works is full-brightness.**
+
+**Bonus — stale-cache trap closed:** the PWA service worker serves `style.css` / `app.js` / `ui.js` cache-first under unversioned URLs, so clients riding an old service worker could keep rendering old (gray) styles no matter how many fixes shipped. Asset URLs are now **version-busted** (`style.css?v=5.1.6`) in lockstep with the package version (static-check enforced); an old SW can never have the new URLs in cache, so the first load after a deploy always fetches the fresh assets.
+
+Guards: static checks enforce the `CTX-AFFORDANCE` section, the native-disabled behavior in `openCtxMenu`, and the version-bust lockstep (index.html ↔ sw.js ↔ package.json); the frontend E2E opens a real context menu and asserts enabled entries are crisp & clickable while gray entries are inert.
+
+Suite green: API 143, frontend 245, static checks. Version 5.1.6 (package, lock, server, APP_VERSION, sw cache + SHELL), README.
 
 ## 🩹 What's new in 5.1.5 — Stop means stop (silences the voice too)
 

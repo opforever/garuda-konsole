@@ -106,6 +106,32 @@ if (affStart === -1 || affEnd === -1 || affEnd < affStart) {
     else ok('enabled controls out-bright the disabled look (affordance section intact)');
 }
 
+/* 5b. 5.1.6 context-menu affordance + cache-busting guard */
+const swjs = fs.readFileSync(path.join(PUB, 'sw.js'), 'utf8');
+const ctxStart = css.indexOf('CTX-AFFORDANCE:START');
+const ctxEnd = css.indexOf('CTX-AFFORDANCE:END');
+if (ctxStart === -1 || ctxEnd === -1 || ctxEnd < ctxStart) {
+    fail('context-menu affordance section missing in style.css (CTX-AFFORDANCE:START/END markers)');
+} else {
+    const seg = css.slice(ctxStart, ctxEnd);
+    if (!/\.ctx-item\s*{\s*color:\s*var\(--text\);\s*\}/.test(seg)) fail('ctx-item must idle at the full theme text color (no color-mix dependency)');
+    else if (!/\.ctx-item\.danger\s*{\s*color:\s*var\(--danger\);\s*\}/.test(seg)) fail('danger ctx-item idle tint missing');
+    else ok('context menu idles crisp: enabled full-text, danger tinted (5.1.6 section intact)');
+}
+if (!/btn\.disabled\s*=\s*true/.test(uijs)) fail('openCtxMenu must make inert entries natively disabled (btn.disabled = true)');
+else if (/btn\.style\.opacity\s*=\s*'0\.4'/.test(uijs)) fail('openCtxMenu must not fake disabled with inline opacity hacks');
+else ok('context menu disabled entries are natively inert (gray always means off)');
+const pkgVersion = require(path.join(__dirname, '..', 'package.json')).version;
+if (!html.includes('style.css?v=' + pkgVersion) || !html.includes('app.js?v=' + pkgVersion) || !html.includes('ui.js?v=' + pkgVersion)) {
+    fail('index.html must reference version-busted style.css/app.js/ui.js (stale service-worker cache trap)');
+} else if (!swjs.includes("const CACHE = 'garuda-konsole-v" + pkgVersion + "'")) {
+    fail('sw.js CACHE name must track the package version');
+} else if (!swjs.includes('/style.css?v=' + pkgVersion) || !swjs.includes('/app.js?v=' + pkgVersion) || !swjs.includes('/ui.js?v=' + pkgVersion)) {
+    fail('sw.js SHELL must pre-cache the version-busted asset URLs');
+} else {
+    ok('asset URLs version-busted in lockstep with package version (stale-SW trap closed)');
+}
+
 /* 6. Cross-file function references */
 console.log('═══ cross-file function check ═══');
 const definedFns = new Set();

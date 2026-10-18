@@ -1208,6 +1208,29 @@ function visible(win, id) {
     ev(rwin, `document.body.classList.remove('reduce-motion'); document.getElementById('lockscreen').classList.add('hidden'); refreshAuroraMotion();`);
     await tick(40);
 
+    /* ── 5.1.6: right-click menu affordance ── */
+    console.log('── 5.1.6: context menu enabled crisp / disabled inert ──');
+    ev(win, `window.__ctx516 = 0; openCtxMenu(140, 140, [
+        { icon: '#i-copy', label: 'Works', run: () => { window.__ctx516 += 1; } },
+        { sep: true },
+        { icon: '#i-x', label: 'Off', disabled: true, run: () => { window.__ctx516 += 100; } },
+        { icon: '#i-x', label: 'Boom', danger: true, run: () => { window.__ctx516 += 10; } }
+    ]);`);
+    await tick(60);
+    const ctxCount = ev(win, `document.querySelectorAll('#context-menu .ctx-item').length`);
+    check('ctx menu renders enabled + disabled entries', ctxCount === 3, 'got ' + ctxCount);
+    check('enabled entry carries no disabled state and no inline dim hack',
+        ev(win, `(() => { const b = document.querySelectorAll('#context-menu .ctx-item')[0]; return !b.disabled && b.style.opacity === '' && b.style.pointerEvents === ''; })()`));
+    check('grayed entry is natively disabled (inert, styled by :disabled)',
+        ev(win, `document.querySelectorAll('#context-menu .ctx-item')[1].disabled === true`));
+    ev(win, `document.querySelectorAll('#context-menu .ctx-item')[1].click();`);
+    check('clicking a grayed entry does nothing and keeps the menu open',
+        ev(win, `window.__ctx516`) === 0 && ev(win, `!document.getElementById('context-menu').classList.contains('hidden')`));
+    ev(win, `document.querySelectorAll('#context-menu .ctx-item')[0].click();`);
+    await tick(30);
+    check('clicking an enabled entry runs it and closes the menu',
+        ev(win, `window.__ctx516`) === 1 && ev(win, `document.getElementById('context-menu').classList.contains('hidden')`));
+
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
     const relevant = fatalErrors.filter((e) => !/Could not load|favicon|Not implemented|blob:fake/i.test(e));

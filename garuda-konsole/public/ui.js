@@ -1721,8 +1721,10 @@ function openCtxMenu(x, y, items) {
         const btn = el('button', 'ctx-item' + (it.danger ? ' danger' : ''));
         btn.innerHTML = `<svg class="ic"><use href="${it.icon || '#i-zap'}"></use></svg><span>${escHtml(it.label)}</span>${it.key ? `<span class="ctx-key">${escHtml(it.key)}</span>` : ''}`;
         if (it.disabled) {
-            btn.style.opacity = '0.4';
-            btn.style.pointerEvents = 'none';
+            /* Truly inert: native disabled state (also styled by the AFFORDANCE
+               section — dimmed, desaturated, not-allowed). No inline-style hacks,
+               so "gray" can never mean "still clickable". */
+            btn.disabled = true;
         } else {
             btn.addEventListener('click', () => { hideContextMenu(); it.run(); });
         }

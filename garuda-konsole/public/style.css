@@ -3233,3 +3233,26 @@ button:disabled:active,
 .icon-btn:disabled:active,
 .btn-mini:disabled:active { transform: none; }
 /* AFFORDANCE:END */
+
+/* ═══════ 5.1.6 — Context menu: enabled = crisp, disabled = truly off ═══════
+   CTX-AFFORDANCE:START
+   Follow-up to the 5.1.4 affordance fix, scoped to the right-click menus.
+   User report: "the buttons that appear when you right click the screen are
+   still grayed out even though they still work."
+   Two root causes closed here:
+   1. The 5.1.4 idle blend relies on color-mix(); engines without it (older
+      WebViews / Safari) fell back to var(--text-dim) — the literal grayed-out
+      look — on every menu entry. Context-menu items now wear the theme's FULL
+      --text color: no blend, no fallback trap, crisp in every engine, every
+      built-in theme and custom JSON theme (they all define --text).
+   2. "Disabled" entries used inline opacity+pointer-events hacks while staying
+      live buttons; openCtxMenu() now sets the native disabled attribute, which
+      the AFFORDANCE :disabled rule styles (dimmed, desaturated, not-allowed).
+      Gray now always means "off" — and everything that works is full-brightness.
+   Danger entries idle in the danger hue so destructive intent reads at a
+   glance; their hover state keeps precedence. Keyboard hints are lifted from
+   --text-faint to --text-dim so they stay legible without competing. */
+.ctx-item { color: var(--text); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item .ctx-key { color: var(--text-dim); }
+/* CTX-AFFORDANCE:END */
