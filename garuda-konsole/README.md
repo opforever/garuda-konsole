@@ -1,8 +1,8 @@
-# Garuda Konsole 5.3.0 🦅
+# Garuda Konsole 5.3.1 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.3.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-458%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.3.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-460%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,10 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 🩹 What's new in 5.3.1 — ydotoold socket path fix (the dot!)
+
+ydotool ≥1.0 listens on **`$XDG_RUNTIME_DIR/.ydotool_socket`** (dot-prefixed); 5.3.0 looked for `ydotool.socket`, so a running daemon was invisible and the status chip said `in:none`. The server now probes both names (+ `YDOTOOL_SOCKET` override), and `tools/rd-setup.sh` creates a **user systemd unit** for ydotoold (survives reboots) and detects an already-running daemon instead of starting a second one. New API test stands up a fake ydotoold socket and **decodes the raw `input_event` structs** (ABS_X/ABS_Y 16384 @ 50 %, BTN_LEFT + SYN, KeyA → code 30). Suite: API 188, frontend 272.
 
 ## 🩹 What's new in 5.2.1 — replays keep their colors, recordings get a library
 

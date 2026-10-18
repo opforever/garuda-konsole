@@ -1,6 +1,7 @@
 /* API smoke tests for Garuda Konsole server (uses node fetch + ws) */
 'use strict';
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const PORT = process.env.PORT || '3198';
 const B = process.env.BASE || `http://localhost:${PORT}`;
@@ -853,12 +854,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     // second server with fixture capture + echo input (sandbox has no compositor/ffmpeg)
     const RD_PORT = '3197';
+    // fake ydotoold socket: captures the raw input_event structs the server emits
+    const net53 = require('net');
+    const ydoSockPath = path.join(process.env.TMPDIR || '/tmp', `gk-ydo-${process.pid}.sock`);
+    try { fs.unlinkSync(ydoSockPath); } catch (e) {}
+    const ydoBytes = [];
+    const ydoSrv = net53.createServer((conn) => conn.on('data', (d) => ydoBytes.push(d)));
+    await new Promise((r) => ydoSrv.listen(ydoSockPath, r));
     const rdSrv = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
         env: Object.assign({}, process.env, {
             PORT: RD_PORT, KONSOLE_LOGIN_LIMIT: '100000',
             GK_RD_CAPTURE_FILE: path.join(__dirname, 'fixtures', 'rd-test.webm'),
             GK_RD_MIME: 'video/webm; codecs=vp8',
-            GK_RD_INPUT: 'echo'
+            YDOTOOL_SOCKET: ydoSockPath
         }),
         stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -867,7 +875,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const z53_login = await j(`${RDB}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: '20090228' }) });
     const z53_tok = z53_login.body && z53_login.body.token;
     const z53_st2 = await j(`${RDB}/api/rd/status`, { headers: { Authorization: `Bearer ${z53_tok}` } });
-    check('rd status reports file capture + echo input', z53_st2.body.capture === 'file' && z53_st2.body.input === 'echo');
+    check('rd status reports file capture + ydotoold input', z53_st2.body.capture === 'file' && z53_st2.body.input === 'ydotoold' && z53_st2.body.ydotoolSocket === ydoSockPath);
 
     const rdWsUnauth = await new Promise((resolve) => {
         const w = new WebSocket(`ws://localhost:${RD_PORT}/ws/rd?auth=bogus`);
@@ -895,20 +903,29 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     if (rdWs) {
         let meta = rdWs.meta;
         for (let i = 0; i < 40 && !meta; i++) { await sleep(100); meta = rdWs.meta; }
-        check('rd-meta announces mime + backends', !!meta && /video\/webm/.test(meta.mime) && meta.capture === 'file' && meta.input === 'echo');
+        check('rd-meta announces mime + backends', !!meta && /video\/webm/.test(meta.mime) && meta.capture === 'file' && meta.input === 'ydotoold');
         for (let i = 0; i < 60 && rdWs.binBytes < 20000; i++) await sleep(100);
         check('media bytes stream over the socket', rdWs.binBytes > 20000, rdWs.binBytes + ' bytes');
         rdWs.ws.send(JSON.stringify({ type: 'rd-pointer', x: 0.5, y: 0.5, button: 0, down: true }));
-        let echoed = null;
-        for (let i = 0; i < 40 && !echoed; i++) {
-            await sleep(80);
-            for (const m of rdWs.msgs) if (m.charCodeAt(0) === 0 && m.includes('rd-input-echo')) { echoed = JSON.parse(m.slice(1)); break; }
-        }
-        check('input event round-trips (echo backend)', !!echoed && echoed.ev && echoed.ev.x === 0.5);
+        rdWs.ws.send(JSON.stringify({ type: 'rd-key', code: 'KeyA', down: true }));
+        let ydoBuf = Buffer.concat(ydoBytes);
+        for (let i = 0; i < 50 && ydoBuf.length < 6 * 24; i++) { await sleep(80); ydoBuf = Buffer.concat(ydoBytes); }
+        const evAt = (off) => ({ type: ydoBuf.readUInt16LE(off + 16), code: ydoBuf.readUInt16LE(off + 18), value: ydoBuf.readInt32LE(off + 20) });
+        const evs = [];
+        for (let off = 0; off + 24 <= ydoBuf.length; off += 24) evs.push(evAt(off));
+        const absX = evs.find((e) => e.type === 3 && e.code === 0);
+        const absY = evs.find((e) => e.type === 3 && e.code === 1);
+        const click = evs.find((e) => e.type === 1 && e.code === 0x110 && e.value === 1);
+        const syn = evs.find((e) => e.type === 0 && e.code === 0);
+        const keyA = evs.find((e) => e.type === 1 && e.code === 30 && e.value === 1);
+        check('pointer → uinput ABS_X/ABS_Y at 50% (16384/32767)', !!absX && absX.value === 16384 && !!absY && absY.value === 16384, JSON.stringify(evs.slice(0, 4)));
+        check('click → BTN_LEFT key event + SYN', !!click && !!syn);
+        check('KeyA → linux keycode 30', !!keyA);
         rdWs.ws.close();
     }
     await sleep(400);
     rdSrv.kill();
+    try { ydoSrv.close(); fs.unlinkSync(ydoSockPath); } catch (e) {}
 
     console.log(`\n═══ RESULT: ${passed} passed, ${failed} failed ═══`);
     if (serverProc) serverProc.kill();

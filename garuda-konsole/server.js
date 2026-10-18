@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.3.0';
+const VERSION = '5.3.1';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -978,7 +978,9 @@ function rdHasBin(b) {
 }
 function rdYdotoolSocket() {
     const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
-    const cands = [process.env.YDOTOOL_SOCKET, path.join(process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`, 'ydotool.socket'), '/tmp/.ydotool_socket'].filter(Boolean);
+    const xdg = process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`;
+    // ydotool >=1.0 defaults to a DOT-prefixed socket in XDG_RUNTIME_DIR
+    const cands = [process.env.YDOTOOL_SOCKET, path.join(xdg, '.ydotool_socket'), path.join(xdg, 'ydotool.socket'), '/tmp/.ydotool_socket'].filter(Boolean);
     for (const c of cands) { try { fs.accessSync(c, fs.constants.W_OK); return c; } catch (e) {} }
     return null;
 }

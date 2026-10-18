@@ -1,6 +1,6 @@
 {
   "name": "garuda-konsole",
-  "version": "5.3.0",
+  "version": "5.3.1",
   "description": "Garuda Konsole 3.1 — a beautiful persistent web terminal with an AI shell agent, split panes, session replay, triggers, live chat, file manager and system monitor.",
   "main": "server.js",
   "scripts": {
