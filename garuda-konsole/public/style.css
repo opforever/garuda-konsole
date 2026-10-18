@@ -3331,3 +3331,37 @@ button:disabled:active,
 .editor-dirty { color: var(--warn); margin-left: 6px; font-size: 12px; }
 .editor-dirty.hidden { display: none; }
 #editor-modal .modal-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* ═══════════════════ 5.3: Remote Desktop drawer ═══════════════════
+   Column layout (header / stage / toolbar) guarantees zero overlap at any
+   viewport, incl. phones with safe-area insets. */
+.rd-drawer { display: flex; flex-direction: column; }
+.rd-drawer .drawer-header { flex-shrink: 0; }
+.rd-stage {
+    position: relative; flex: 1; min-height: 0;
+    background: #05070b; display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+}
+.rd-stage video {
+    width: 100%; height: 100%; object-fit: contain;
+    background: #05070b; touch-action: none; display: block;
+}
+.rd-stage video.hidden { display: none; }
+.rd-hint {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    padding: 20px; text-align: center; color: var(--text-dim); font-size: 12.5px; line-height: 1.6;
+    pointer-events: none;
+}
+.rd-hint.hidden { display: none; }
+.rd-toolbar {
+    flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 8px 10px calc(8px + var(--sab)); border-top: 1px solid var(--border);
+    background: var(--chrome-2);
+}
+.rd-toolbar .btn-mini { flex: 0 1 auto; }
+#rd-status-chip { max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
+.rd-stage.kb-capture video { cursor: none; }
+@media (max-width: 480px) {
+    .rd-toolbar { gap: 5px; padding: 7px 8px calc(7px + var(--sab)); }
+    .rd-toolbar .btn-mini { padding: 6px 8px; font-size: 10.5px; }
+}

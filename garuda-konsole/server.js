@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.2.1';
+const VERSION = '5.3.0';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -951,6 +951,217 @@ app.get('/api/replay/:token', (req, res) => {
     if (!share || Date.now() - share.createdAt > REPLAY_TTL_MS) return res.status(404).json({ error: 'Replay not found or expired' });
     res.json({ title: share.title, createdAt: share.createdAt, events: share.events });
 });
+
+/* ─────────────── 5.3: Remote Desktop — screen + input (+audio) over WS/MSE ───────────────
+   Capture is pluggable (the sandbox has no compositor; real machines do):
+     1. GK_RD_CAPTURE_CMD  — any shell command writing streamable fMP4/WebM to stdout
+                             (tools/rd-screencast-kwin.sh = zero-prompt KDE Wayland path)
+     2. GK_RD_CAPTURE_FILE — loop-stream a file (tests, demos)
+     3. none               — status reports unavailable + setup hints
+   Input backends: ydotoold socket (no prompts) → ydotool CLI → echo (tests) → none.
+   Approval model: web login is the gate; KWin D-Bus screencast + ydotoold need no
+   per-session consent (one-time setup via tools/rd-setup.sh). */
+
+const RD = {
+    enabled: process.env.GK_RD !== '0',
+    captureCmd: process.env.GK_RD_CAPTURE_CMD || '',
+    captureFile: process.env.GK_RD_CAPTURE_FILE || '',
+    inputMode: process.env.GK_RD_INPUT || '',
+    width: clampInt(process.env.GK_RD_WIDTH, 320, 7680, 1920),
+    height: clampInt(process.env.GK_RD_HEIGHT, 240, 4320, 1080),
+    mime: process.env.GK_RD_MIME || ''
+};
+let rdSession = null; // { kind, proc, clients:Set, mime, startedAt, bytes }
+
+function rdHasBin(b) {
+    try { return require('child_process').spawnSync('which', [b], { stdio: 'ignore' }).status === 0; } catch (e) { return false; }
+}
+function rdYdotoolSocket() {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
+    const cands = [process.env.YDOTOOL_SOCKET, path.join(process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`, 'ydotool.socket'), '/tmp/.ydotool_socket'].filter(Boolean);
+    for (const c of cands) { try { fs.accessSync(c, fs.constants.W_OK); return c; } catch (e) {} }
+    return null;
+}
+function rdInputBackend() {
+    if (RD.inputMode === 'echo') return 'echo';
+    if (RD.inputMode === 'none') return 'none';
+    if (rdYdotoolSocket()) return 'ydotoold';
+    if (rdHasBin('ydotool')) return 'ydotool-cli';
+    return 'none';
+}
+function rdDetectCapture() {
+    if (RD.captureCmd) return { kind: 'cmd', cmd: RD.captureCmd };
+    if (RD.captureFile && fs.existsSync(RD.captureFile)) return { kind: 'file', file: RD.captureFile };
+    const kwinScript = path.join(__dirname, 'tools', 'rd-screencast-kwin.sh');
+    if (process.env.GK_RD_KWIN !== '0' && fs.existsSync(kwinScript) && rdHasBin('busctl') && rdHasBin('gst-launch-1.0')) {
+        return { kind: 'cmd', cmd: `sh '${kwinScript}'` };
+    }
+    return null;
+}
+function rdMimeFor(capture) {
+    if (RD.mime) return RD.mime;
+    if (capture && capture.kind === 'file') {
+        return /\.webm$/i.test(capture.file) ? 'video/webm; codecs=vp8' : 'video/mp4; codecs=avc1.42E01E';
+    }
+    return 'video/mp4; codecs=avc1.42E01E';
+}
+
+app.get('/api/rd/status', requireAuth, (req, res) => {
+    const capture = rdDetectCapture();
+    res.json({
+        enabled: RD.enabled,
+        capture: capture ? capture.kind : null,
+        input: rdInputBackend(),
+        mime: rdMimeFor(capture),
+        width: RD.width, height: RD.height,
+        active: !!rdSession,
+        clients: rdSession ? rdSession.clients.size : 0,
+        ydotoolSocket: rdYdotoolSocket(),
+        hint: capture ? null : 'No capture source. Set GK_RD_CAPTURE_CMD (see tools/rd-screencast-kwin.sh) or GK_RD_CAPTURE_FILE.'
+    });
+});
+
+/* linux input_event: {time_sec u64, time_usec u64, type u16, code u16, value s32} = 24 B */
+function rdInputEvent(type, code, value) {
+    const b = Buffer.alloc(24);
+    const now = Date.now();
+    b.writeBigUInt64LE(BigInt(Math.floor(now / 1000)), 0);
+    b.writeBigUInt64LE(BigInt((now % 1000) * 1000), 8);
+    b.writeUInt16LE(type, 16);
+    b.writeUInt16LE(code, 18);
+    b.writeInt32LE(value | 0, 20);
+    return b;
+}
+const RD_KEYMAP = {
+    KeyA: 30, KeyB: 48, KeyC: 46, KeyD: 32, KeyE: 18, KeyF: 33, KeyG: 34, KeyH: 35, KeyI: 23, KeyJ: 36, KeyK: 37, KeyL: 38, KeyM: 50, KeyN: 49, KeyO: 24, KeyP: 25, KeyQ: 16, KeyR: 19, KeyS: 31, KeyT: 20, KeyU: 22, KeyV: 47, KeyW: 17, KeyX: 45, KeyY: 21, KeyZ: 44,
+    Digit1: 2, Digit2: 3, Digit3: 4, Digit4: 5, Digit5: 6, Digit6: 7, Digit7: 8, Digit8: 9, Digit9: 10, Digit0: 11,
+    Enter: 28, Escape: 1, Backspace: 14, Tab: 15, Space: 57, Minus: 12, Equal: 13, BracketLeft: 26, BracketRight: 27, Backslash: 43, Semicolon: 39, Quote: 40, Backquote: 41, Comma: 51, Period: 52, Slash: 53,
+    ArrowUp: 103, ArrowLeft: 105, ArrowRight: 106, ArrowDown: 108, Home: 102, End: 107, PageUp: 104, PageDown: 109, Delete: 111, Insert: 110,
+    F1: 59, F2: 60, F3: 61, F4: 62, F5: 63, F6: 64, F7: 65, F8: 66, F9: 67, F10: 68, F11: 87, F12: 88,
+    ControlLeft: 29, ControlRight: 97, ShiftLeft: 42, ShiftRight: 54, AltLeft: 56, AltRight: 100, MetaLeft: 125, MetaRight: 126, CapsLock: 58
+};
+let rdSock = null;
+function rdSendYdotoold(bufs) {
+    const sock = rdYdotoolSocket();
+    if (!sock) return false;
+    try {
+        const net = require('net');
+        if (!rdSock || rdSock.destroyed) {
+            rdSock = net.connect(sock);
+            rdSock.on('error', () => { try { rdSock.destroy(); } catch (e) {} rdSock = null; });
+        }
+        rdSock.write(Buffer.concat(bufs));
+        return true;
+    } catch (e) { return false; }
+}
+function rdApplyInput(ev) {
+    const backend = rdInputBackend();
+    if (backend === 'echo') return { ok: true, backend, echo: ev };
+    if (backend === 'none') return { ok: false, backend, error: 'no input backend (enable ydotoold — see tools/rd-setup.sh)' };
+    const bufs = [];
+    const SYN = [0, 0, 0];
+    if (ev.type === 'rd-pointer') {
+        if (typeof ev.x === 'number' && typeof ev.y === 'number') {
+            bufs.push(rdInputEvent(3, 0, Math.max(0, Math.min(32767, Math.round(ev.x * 32767)))));
+            bufs.push(rdInputEvent(3, 1, Math.max(0, Math.min(32767, Math.round(ev.y * 32767)))));
+        }
+        if (typeof ev.wheel === 'number' && ev.wheel) bufs.push(rdInputEvent(2, 8, ev.wheel > 0 ? -1 : 1));
+        if (typeof ev.button === 'number' && ev.button >= 0 && typeof ev.down === 'boolean') {
+            const btn = ev.button === 2 ? 0x111 : ev.button === 1 ? 0x112 : 0x110;
+            bufs.push(rdInputEvent(1, btn, ev.down ? 1 : 0));
+        }
+        bufs.push(rdInputEvent(SYN[0], SYN[1], SYN[2]));
+    } else if (ev.type === 'rd-key') {
+        const code = RD_KEYMAP[ev.code];
+        if (code == null) return { ok: false, backend, error: 'unmapped key ' + ev.code };
+        bufs.push(rdInputEvent(1, code, ev.down ? 1 : 0));
+        bufs.push(rdInputEvent(0, 0, 0));
+    } else {
+        return { ok: false, backend, error: 'unknown rd event' };
+    }
+    if (backend === 'ydotoold') {
+        if (rdSendYdotoold(bufs)) return { ok: true, backend };
+        return { ok: false, backend, error: 'ydotoold socket write failed' };
+    }
+    return { ok: false, backend, error: 'input backend unavailable' };
+}
+
+function rdBroadcastCtrl(obj) {
+    if (!rdSession) return;
+    const msg = CTRL_PREFIX + JSON.stringify(obj);
+    for (const ws of rdSession.clients) { try { if (ws.readyState === WebSocket.OPEN) ws.send(msg); } catch (e) {} }
+}
+function rdStop(reason) {
+    if (!rdSession) return;
+    const s = rdSession;
+    rdSession = null;
+    try { if (s.proc) s.proc.kill(); } catch (e) {}
+    if (s.fileTimer) clearInterval(s.fileTimer);
+    for (const ws of s.clients) { try { sendCtrl(ws, { type: 'rd-ended', reason: reason || 'stopped' }); } catch (e) {} }
+    log(`[rd] session stopped (${reason || 'done'})`);
+}
+function rdStart(ws) {
+    if (rdSession) { rdSession.clients.add(ws); sendCtrl(ws, { type: 'rd-meta', mime: rdSession.mime, width: RD.width, height: RD.height, capture: rdSession.kind, input: rdInputBackend(), joined: true }); return; }
+    const capture = rdDetectCapture();
+    if (!RD.enabled || !capture) {
+        sendCtrl(ws, { type: 'rd-ended', reason: 'no-capture', hint: 'Set GK_RD_CAPTURE_CMD (tools/rd-screencast-kwin.sh on KDE) or GK_RD_CAPTURE_FILE.' });
+        return;
+    }
+    const mime = rdMimeFor(capture);
+    rdSession = { kind: capture.kind, proc: null, clients: new Set([ws]), mime, startedAt: Date.now(), bytes: 0, fileTimer: null };
+    sendCtrl(ws, { type: 'rd-meta', mime, width: RD.width, height: RD.height, capture: capture.kind, input: rdInputBackend() });
+    const feed = (chunk) => {
+        if (!rdSession) return;
+        rdSession.bytes += chunk.length;
+        for (const c of rdSession.clients) { try { if (c.readyState === WebSocket.OPEN) c.send(chunk); } catch (e) {} }
+    };
+    if (capture.kind === 'file') {
+        let pos = 0;
+        const buf = fs.readFileSync(capture.file);
+        rdSession.fileTimer = setInterval(() => {
+            if (!rdSession) return;
+            const chunk = buf.subarray(pos, pos + 32768);
+            pos += chunk.length;
+            feed(chunk);
+            if (pos >= buf.length) {
+                clearInterval(rdSession.fileTimer);
+                rdSession.fileTimer = null;
+                rdBroadcastCtrl({ type: 'rd-stream-ended' }); // media done; session (input) stays alive
+                log('[rd] file stream ended (session kept for input)');
+            }
+        }, 120);
+    } else {
+        const proc = require('child_process').spawn('sh', ['-c', capture.cmd], { stdio: ['ignore', 'pipe', 'pipe'] });
+        rdSession.proc = proc;
+        proc.stdout.on('data', feed);
+        proc.stderr.on('data', (d) => log('[rd-capture] ' + d.toString().slice(0, 200)));
+        proc.on('exit', (code) => rdStop('capture exited ' + code));
+    }
+    log(`[rd] session started (${capture.kind}, ${mime})`);
+}
+function handleRdSocket(ws) {
+    ws.on('message', (raw) => {
+        let ev;
+        try { ev = JSON.parse(raw.toString()); } catch (e) { return; }
+        if (!ev || typeof ev.type !== 'string') return;
+        if (!rdSession || !rdSession.clients.has(ws)) { rdStart(ws); if (ev.type !== 'rd-hello') return; }
+        if (ev.type === 'rd-pointer' || ev.type === 'rd-key') {
+            const res = rdApplyInput(ev);
+            if (res.echo) sendCtrl(ws, { type: 'rd-input-echo', ev });
+            else if (!res.ok) sendCtrl(ws, { type: 'rd-input-error', error: res.error, backend: res.backend });
+        } else if (ev.type === 'rd-stop') {
+            rdSession.clients.delete(ws);
+            if (!rdSession.clients.size) rdStop('client left');
+        }
+    });
+    ws.on('close', () => {
+        if (rdSession && rdSession.clients.has(ws)) {
+            rdSession.clients.delete(ws);
+            if (!rdSession.clients.size) rdStop('last client left');
+        }
+    });
+    rdStart(ws);
+}
 
 /* ─────────────── 5.2.1: persistent recording library (~/Rec_jsonl) ─────────────── */
 
@@ -2457,6 +2668,15 @@ wss.on('connection', (ws, req) => {
 
     const credOk = authParam && (isValidToken(authParam) || authParam === PASSWORD);
     const share = shareToken ? shareTokens.get(shareToken) : null;
+    if (url.pathname === '/ws/rd') {
+        if (!credOk) {
+            sendCtrl(ws, { type: 'error', message: 'Unauthorized' });
+            ws.close(4401, 'unauthorized');
+            return;
+        }
+        handleRdSocket(ws);
+        return;
+    }
     const shareValid = share && Date.now() - share.createdAt <= SHARE_TTL_MS;
 
     if (credOk) {

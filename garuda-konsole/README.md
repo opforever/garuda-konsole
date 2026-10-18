@@ -1,8 +1,8 @@
-# Garuda Konsole 5.2.1 🦅
+# Garuda Konsole 5.3.0 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.2.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-443%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.3.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-458%20passing-2fd07a)
 
 ---
 
@@ -210,6 +210,21 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🖥️ What's new in 5.3.0 — Remote Desktop: your whole machine, inside the web page
+
+The big one: a **Remote Desktop drawer** that streams this machine's screen into Garuda Konsole and lets you control it — pointer, keyboard, wheel, touch — from any browser on localhost **or** your Tailscale HTTPS URL (it all rides the existing authed session, so the tailnet proxy works unchanged).
+
+- **Video:** pluggable capture → fragmented MP4/WebM over the authed `/ws/rd` socket → **MSE** in the drawer (no WebRTC/TURN needed; works through Tailscale Serve). Capture sources, in order: `GK_RD_CAPTURE_CMD` (any command emitting streamable fMP4/WebM — `tools/rd-screencast-kwin.sh` does **zero-prompt KDE Wayland** capture via KWin's session D-Bus + PipeWire + VAAPI/x264), `GK_RD_CAPTURE_FILE` (tests/demos), else status reports "no capture source" with setup hints.
+- **Input:** `ydotoold` socket (kernel uinput — **no per-session approvals**; one-time `tools/rd-setup.sh`), ydotool-CLI fallback, `echo` backend for tests. Absolute pointer (normalized coords), buttons, wheel, full keymap; touch = drag-move, tap-click, long-press right-click.
+- **Audio:** the capture pipeline may carry an Opus/AAC track in the same stream; the drawer has a mute toggle (autoplay-safe: starts muted).
+- **Approval model (as requested):** the web login is the gate — one time per device (7-day cookie). KWin D-Bus screencast + ydotoold need **no portal dialogs at all**; the portal path (if you switch to it) uses restore tokens, i.e. approve once, remembered.
+- **Mobile-first layout:** header / video stage / toolbar are a strict column with safe-area padding — verified at 390×844 and 1280×860: zero overlap, zero horizontal overflow.
+- **Env knobs:** `GK_RD=0` disables; `GK_RD_CAPTURE_CMD`, `GK_RD_CAPTURE_FILE`, `GK_RD_MIME`, `GK_RD_WIDTH/HEIGHT`, `GK_RD_INPUT` (`echo`/`none`), `GK_RD_KWIN=0`.
+
+Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
+
+Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
 
 ## 🩹 What's new in 5.2.1 — replays keep their colors, recordings get a library
 

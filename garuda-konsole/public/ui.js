@@ -470,7 +470,7 @@ function closeDrawer(id) {
 }
 function closeDrawerIfOpen() {
     let closed = false;
-    ['stats-drawer', 'files-drawer', 'chat-drawer', 'activity-drawer', 'ai-drawer', 'tasks-drawer'].forEach((id) => {
+    ['stats-drawer', 'files-drawer', 'chat-drawer', 'activity-drawer', 'ai-drawer', 'tasks-drawer', 'rd-drawer'].forEach((id) => {
         const d = $(id);
         if (d && !d.classList.contains('hidden')) { d.classList.add('hidden'); closed = true; }
     });
@@ -890,6 +890,8 @@ function buildPaletteItems(query) {
     pushScored({ sec: 'Voice', icon: '#i-download', title: 'Save last AI reply as audio (WAV)', sub: 'download spoken audio', kw: 'wav mp3 export download voice reply', run: () => { closePalette(); const it = aiState.ui.slice().reverse().find((i) => i.text); if (it) downloadTextAsMp3(it.text, it.id); else showToast({ type: 'info', title: 'No AI reply to export yet' }); } }, 'mp3 export reply voice');
     for (const r of getRecentCommands().slice(0, 40)) pushScored({ sec: 'Recent', icon: '#i-clock', title: r, sub: 'run again', kw: r, run: () => { runCommandInActiveTab(r); closePalette(); } }, r);
     /* 5.2: saved workspace layouts */
+    pushScored({ sec: 'Actions', icon: '#i-monitor', title: 'Remote Desktop: open panel', sub: 'stream this machine\'s screen', kw: 'remote desktop vnc screen stream control', run: () => { closePalette(); toggleRd(); } }, 'remote desktop open panel');
+    pushScored({ sec: 'Actions', icon: '#i-monitor', title: rdState.connected ? 'Remote Desktop: stop streaming' : 'Remote Desktop: connect', sub: 'screen + input + audio', kw: 'remote desktop connect stop stream', run: () => { closePalette(); const d = $('rd-drawer'); if (d && d.classList.contains('hidden')) toggleRd(); rdState.connected ? rdDisconnect() : rdConnect(); } }, 'remote desktop connect stop');
     pushScored({ sec: 'Layouts', icon: '#i-save', title: 'Save current layout…', sub: 'tabs + splits + colors', kw: 'layout save workspace snapshot arrange', run: () => { closePalette(); saveCurrentLayoutPrompt(); } }, 'save layout workspace snapshot');
     for (const r of recordingsCache.slice(0, 12)) {
         const rn = r.name.replace(/^garuda-replay-/, '').replace(/\.jsonl$/, '');
@@ -1953,6 +1955,13 @@ const ACTIONS = {
     'files-upload': () => triggerUploadToFiles(),
     'stats': () => { closeMobileMore(); toggleStats(); },
     'stats-close': () => closeDrawer('stats-drawer'),
+    'rd-open': () => toggleRd(),
+    'rd-close': () => closeDrawer('rd-drawer'),
+    'rd-connect': () => rdConnect(),
+    'rd-disconnect': () => rdDisconnect(),
+    'rd-kbd': () => rdSetKb(!rdState.kb),
+    'rd-mute': (n) => { const v = $('rd-video'); if (!v) return; v.muted = !v.muted; n.textContent = v.muted ? '🔇 Muted' : '🔊 Audio'; },
+    'rd-full': () => { const st = document.querySelector('.rd-stage'); if (st && st.requestFullscreen) st.requestFullscreen().catch(() => {}); },
     'clear': () => { closeMobileMore(); clearTerminal(); },
     'font-up': () => changeFontSize(1),
     'font-down': () => changeFontSize(-1),
@@ -4954,4 +4963,188 @@ async function deleteRecording(name) {
         await refreshRecordingsCache();
         showToast({ type: 'success', title: 'Recording deleted', duration: 1500, silent: true });
     } catch (e) { showToast({ type: 'error', title: 'Delete failed', text: String(e.message || e) }); }
+}
+
+/* ═══════════════════ 5.3: Remote Desktop client (MSE over WS) ═══════════════════ */
+const rdState = { ws: null, ms: null, sb: null, queue: [], mime: null, kb: false, connected: false, backends: null, lpTimer: null, objUrl: null };
+
+function rdSetChip(txt) { const c = $('rd-status-chip'); if (c) c.textContent = txt; }
+function rdSetButtons(on) {
+    ['rd-kbd-btn', 'rd-mute-btn', 'rd-full-btn', 'rd-disconnect-btn'].forEach((id) => {
+        const n = $(id); if (n) n.classList.toggle('hidden', !on);
+    });
+    const cb = $('rd-connect-btn'); if (cb) cb.classList.toggle('hidden', on);
+    const hint = $('rd-hint'); if (hint) hint.classList.toggle('hidden', on);
+    const v = $('rd-video'); if (v) v.classList.toggle('hidden', !on);
+}
+function toggleRd() {
+    if (isViewerSession) { showToast({ type: 'info', title: 'Host only', text: 'Remote Desktop belongs to the host session.' }); return; }
+    const drawer = $('rd-drawer');
+    if (!drawer) return;
+    const opening = drawer.classList.contains('hidden');
+    closeDrawer('files-drawer'); closeDrawer('ai-drawer'); closeDrawer('stats-drawer'); closeDrawer('chat-drawer'); closeDrawer('activity-drawer'); closeDrawer('tasks-drawer');
+    drawer.classList.toggle('hidden', !opening);
+    if (opening) rdRefreshStatus();
+}
+async function rdRefreshStatus() {
+    try {
+        const st = await api('/api/rd/status');
+        rdSetChip(rdState.connected ? 'live' : (st.capture ? `ready · ${st.capture} · in:${st.input}` : 'no capture source'));
+        if (!st.capture && !rdState.connected) {
+            const h = $('rd-hint');
+            if (h) h.innerHTML = 'No capture source on this machine yet.<br>Run <code>sh tools/rd-setup.sh</code> once on the host, or set <code>GK_RD_CAPTURE_CMD</code> / <code>GK_RD_CAPTURE_FILE</code>.<br>See README → Remote Desktop.';
+        }
+    } catch (e) { rdSetChip('status unavailable'); }
+}
+function rdConnect() {
+    if (rdState.connected) return;
+    if (typeof MediaSource === 'undefined' || !window.MediaSource) {
+        showToast({ type: 'error', title: 'Unsupported browser', text: 'This browser lacks MediaSource Extensions (MSE).' });
+        return;
+    }
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    let ws;
+    try { ws = new WebSocket(`${proto}://${location.host}/ws/rd?auth=${encodeURIComponent(token)}`); } catch (e) { showToast({ type: 'error', title: 'Cannot open stream socket' }); return; }
+    ws.binaryType = 'arraybuffer';
+    rdState.ws = ws; rdState.queue = []; rdState.sb = null; rdState.ms = null;
+    rdSetChip('connecting…');
+    ws.onopen = () => { rdState.connected = true; rdSetChip('live'); rdSetButtons(true); };
+    ws.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+            const txt = e.data.charCodeAt(0) === 0 ? e.data.slice(1) : e.data; // ctrl frames are NUL-prefixed
+            let m; try { m = JSON.parse(txt); } catch (err) { return; }
+            if (m.type === 'rd-meta') rdOnMeta(m);
+            else if (m.type === 'rd-ended') {
+                rdTeardown();
+                rdSetChip('ended: ' + (m.reason || ''));
+                if (m.hint) showToast({ type: 'warn', title: 'Remote Desktop unavailable', text: m.hint, duration: 7000 });
+            } else if (m.type === 'rd-input-echo') { rdState.lastEcho = m.ev; }
+            else if (m.type === 'rd-stream-ended') {
+                if (rdState.ms && rdState.ms.readyState === 'open') { try { rdState.ms.endOfStream(); } catch (e) {} }
+                rdSetChip('stream ended · in:' + ((rdState.backends && rdState.backends.input) || '?'));
+            } else if (m.type === 'rd-input-error') {
+                rdSetChip('input off: ' + (m.backend || 'none'));
+            }
+        } else {
+            rdState.queue.push(new Uint8Array(e.data));
+            rdDrain();
+        }
+    };
+    ws.onclose = () => { if (rdState.ws === ws) { rdTeardown(); rdSetChip('disconnected'); } };
+    ws.onerror = () => { try { ws.close(); } catch (e) {} };
+}
+function rdOnMeta(m) {
+    rdState.mime = m.mime;
+    rdState.backends = { capture: m.capture, input: m.input };
+    rdSetChip(`live · ${m.capture} · in:${m.input}`);
+    const video = $('rd-video');
+    if (!video) return;
+    rdBindVideoOnce(video);
+    const ms = new MediaSource();
+    rdState.ms = ms;
+    if (rdState.objUrl) { try { URL.revokeObjectURL(rdState.objUrl); } catch (e) {} }
+    rdState.objUrl = URL.createObjectURL(ms);
+    video.src = rdState.objUrl;
+    video.muted = true;
+    ms.addEventListener('sourceopen', () => {
+        try { rdState.sb = ms.addSourceBuffer(m.mime); } catch (e) {
+            showToast({ type: 'error', title: 'Codec unsupported here', text: m.mime + ' — try Chrome/Firefox.' });
+            return;
+        }
+        rdState.sb.mode = 'segments';
+        rdState.sb.addEventListener('updateend', rdDrain);
+        rdDrain();
+    });
+    rdBindInput(true);
+    const mb = $('rd-mute-btn'); if (mb) mb.textContent = '🔇 Muted';
+}
+function rdDrain() {
+    const sb = rdState.sb;
+    if (!sb || sb.updating || !rdState.queue.length) return;
+    const chunk = rdState.queue.shift();
+    try { sb.appendBuffer(chunk); } catch (e) {
+        if (e.name === 'QuotaExceededError') rdState.queue.unshift(chunk);
+        else if (e.name === 'InvalidStateError') rdState.sb = null;
+    }
+    if (rdState.queue.length && sb && !sb.updating) setTimeout(rdDrain, 0);
+}
+function rdBindVideoOnce(video) {
+    if (video.dataset.rdBound) return;
+    video.dataset.rdBound = '1';
+    video.addEventListener('timeupdate', () => {
+        if (!video.buffered || !video.buffered.length) return;
+        const end = video.buffered.end(video.buffered.length - 1);
+        if (end - video.currentTime > 1.6) video.currentTime = Math.max(0, end - 0.3); // stay at the live edge
+        if (video.paused) video.play().catch(() => {});
+    });
+}
+function rdNorm(e) {
+    const v = $('rd-video');
+    if (!v || !v.videoWidth) return null;
+    const r = v.getBoundingClientRect();
+    const scale = Math.min(r.width / v.videoWidth, r.height / v.videoHeight);
+    const dw = v.videoWidth * scale, dh = v.videoHeight * scale;
+    const ox = r.left + (r.width - dw) / 2, oy = r.top + (r.height - dh) / 2;
+    const x = (e.clientX - ox) / dw, y = (e.clientY - oy) / dh;
+    return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
+}
+function rdSend(obj) {
+    if (rdState.ws && rdState.ws.readyState === WebSocket.OPEN) { try { rdState.ws.send(JSON.stringify(obj)); } catch (e) {} }
+}
+function rdBindInput(on) {
+    const v = $('rd-video');
+    if (!v || v.dataset.rdInputBound) return;
+    v.dataset.rdInputBound = '1';
+    v.setAttribute('tabindex', '0');
+    v.addEventListener('pointermove', (e) => { const p = rdNorm(e); if (p && e.pointerType !== 'touch' || (p && e.buttons)) rdSend({ type: 'rd-pointer', x: p.x, y: p.y }); });
+    v.addEventListener('pointerdown', (e) => {
+        const p = rdNorm(e); if (!p) return;
+        v.focus({ preventScroll: true });
+        if (e.pointerType === 'touch') {
+            rdSend({ type: 'rd-pointer', x: p.x, y: p.y });
+            rdState.lpTimer = setTimeout(() => { rdSend({ type: 'rd-pointer', x: p.x, y: p.y, button: 2, down: true }); rdSend({ type: 'rd-pointer', x: p.x, y: p.y, button: 2, down: false }); rdState.lpTimer = 'fired'; }, 550);
+            return;
+        }
+        rdSend({ type: 'rd-pointer', x: p.x, y: p.y, button: e.button === 2 ? 2 : e.button === 1 ? 1 : 0, down: true });
+    });
+    v.addEventListener('pointerup', (e) => {
+        if (rdState.lpTimer === 'fired') { rdState.lpTimer = null; return; }
+        if (rdState.lpTimer) { clearTimeout(rdState.lpTimer); rdState.lpTimer = null; }
+        const p = rdNorm(e); if (!p || e.pointerType === 'touch') { if (p && e.pointerType === 'touch') rdSend({ type: 'rd-pointer', x: p.x, y: p.y, button: 0, down: true }), rdSend({ type: 'rd-pointer', x: p.x, y: p.y, button: 0, down: false }); return; }
+        rdSend({ type: 'rd-pointer', x: p.x, y: p.y, button: e.button === 2 ? 2 : e.button === 1 ? 1 : 0, down: false });
+    });
+    v.addEventListener('contextmenu', (e) => e.preventDefault());
+    v.addEventListener('wheel', (e) => { e.preventDefault(); rdSend({ type: 'rd-pointer', wheel: Math.sign(e.deltaY) || 1 }); }, { passive: false });
+    const key = (down) => (e) => {
+        if (!rdState.kb) return;
+        if (e.key === 'Escape') { rdSetKb(false); return; }
+        e.preventDefault(); e.stopPropagation();
+        rdSend({ type: 'rd-key', code: e.code, down });
+    };
+    v.addEventListener('keydown', key(true));
+    v.addEventListener('keyup', key(false));
+}
+function rdSetKb(on) {
+    rdState.kb = on;
+    const b = $('rd-kbd-btn'); if (b) b.textContent = on ? '⌨ Capturing…' : '⌨ Keyboard';
+    const stage = document.querySelector('.rd-stage'); if (stage) stage.classList.toggle('kb-capture', on);
+    if (on) { const v = $('rd-video'); if (v) v.focus({ preventScroll: true }); }
+}
+function rdTeardown() {
+    rdState.connected = false;
+    rdState.kb = false;
+    if (rdState.ws) { try { rdState.ws.onclose = null; rdState.ws.close(); } catch (e) {} rdState.ws = null; }
+    if (rdState.ms && rdState.ms.readyState === 'open') { try { rdState.ms.endOfStream(); } catch (e) {} }
+    rdState.ms = null; rdState.sb = null; rdState.queue = [];
+    const v = $('rd-video');
+    if (v) { try { v.removeAttribute('src'); v.load(); } catch (e) {} }
+    if (rdState.objUrl) { try { URL.revokeObjectURL(rdState.objUrl); } catch (e) {} rdState.objUrl = null; }
+    rdSetButtons(false);
+    rdSetKb(false);
+}
+function rdDisconnect() {
+    if (rdState.ws && rdState.ws.readyState === WebSocket.OPEN) rdSend({ type: 'rd-stop' });
+    rdTeardown();
+    rdSetChip('idle');
+    rdRefreshStatus();
 }

@@ -1313,6 +1313,23 @@ function visible(win, id) {
     await tick(300);
     check('palette cache refreshes after delete', ev(win, `!recordingsCache.some((r) => r.name === ${JSON.stringify(recName521)})`));
 
+
+    /* ── 5.3: remote desktop UI (jsdom has no MSE/WebSocket server here) ── */
+    console.log('── 5.3: remote desktop UI ──');
+    check('rd drawer markup present', ev(win, `!!document.getElementById('rd-drawer') && !!document.getElementById('rd-video') && !!document.getElementById('rd-toolbar' ) || !!document.querySelector('.rd-toolbar')`));
+    ev(win, `toggleRd()`);
+    check('rd drawer opens', ev(win, `!document.getElementById('rd-drawer').classList.contains('hidden')`));
+    ev(win, `rdConnect()`);
+    await tick(300);
+    check('browser without MSE degrades to a toast (no crash)', ev(win, `rdState.connected`) === false);
+    check('palette offers remote desktop entries', ev(win, `buildPaletteItems('remote desktop').some((i) => /Remote Desktop/.test(i.title))`));
+    ev(win, `rdSetButtons(true)`);
+    check('toolbar buttons toggle visibility', ev(win, `!document.getElementById('rd-kbd-btn').classList.contains('hidden') && !document.getElementById('rd-disconnect-btn').classList.contains('hidden')`));
+    ev(win, `rdSetKb(true)`);
+    check('keyboard capture state toggles', ev(win, `rdState.kb === true && document.querySelector('.rd-stage').classList.contains('kb-capture')`));
+    ev(win, `rdSetKb(false); rdTeardown(); toggleRd();`);
+    check('rd teardown resets UI', ev(win, `document.getElementById('rd-drawer').classList.contains('hidden') && document.getElementById('rd-connect-btn').classList.contains('hidden') === false`));
+
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
     const relevant = fatalErrors.filter((e) => !/Could not load|favicon|Not implemented|blob:fake/i.test(e));

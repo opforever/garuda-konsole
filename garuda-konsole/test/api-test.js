@@ -844,6 +844,72 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const z521_list2 = await j(`${B}/api/recordings`, { headers: H });
     check('delete removes the file', z521_del.status === 200 && !(z521_list2.body.recordings || []).some((r) => r.name === z521_save.body.name));
 
+
+    console.log('── 5.3: remote desktop (status, ws auth, stream, echo input) ──');
+    const z53_st = await j(`${B}/api/rd/status`, { headers: H });
+    check('rd status shape', z53_st.status === 200 && 'capture' in z53_st.body && 'input' in z53_st.body && typeof z53_st.body.enabled === 'boolean' && typeof z53_st.body.width === 'number');
+    const z53_noauth = await j(`${B}/api/rd/status`);
+    check('rd status requires auth', z53_noauth.status === 401 || z53_noauth.status === 403);
+
+    // second server with fixture capture + echo input (sandbox has no compositor/ffmpeg)
+    const RD_PORT = '3197';
+    const rdSrv = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+        env: Object.assign({}, process.env, {
+            PORT: RD_PORT, KONSOLE_LOGIN_LIMIT: '100000',
+            GK_RD_CAPTURE_FILE: path.join(__dirname, 'fixtures', 'rd-test.webm'),
+            GK_RD_MIME: 'video/webm; codecs=vp8',
+            GK_RD_INPUT: 'echo'
+        }),
+        stdio: ['ignore', 'pipe', 'pipe']
+    });
+    const RDB = `http://localhost:${RD_PORT}`;
+    for (let i = 0; i < 60; i++) { try { const r = await fetch(RDB + '/healthz'); if (r.ok) break; } catch (e) {} await sleep(150); }
+    const z53_login = await j(`${RDB}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: '20090228' }) });
+    const z53_tok = z53_login.body && z53_login.body.token;
+    const z53_st2 = await j(`${RDB}/api/rd/status`, { headers: { Authorization: `Bearer ${z53_tok}` } });
+    check('rd status reports file capture + echo input', z53_st2.body.capture === 'file' && z53_st2.body.input === 'echo');
+
+    const rdWsUnauth = await new Promise((resolve) => {
+        const w = new WebSocket(`ws://localhost:${RD_PORT}/ws/rd?auth=bogus`);
+        w.on('close', (code) => resolve(code));
+        w.on('error', () => resolve('err'));
+        setTimeout(() => resolve('timeout'), 4000);
+    });
+    check('rd socket rejects bad auth', rdWsUnauth === 4401 || rdWsUnauth === 'err');
+
+    const rdWs = await new Promise((resolve) => {
+        const w = new WebSocket(`ws://localhost:${RD_PORT}/ws/rd?auth=${z53_tok}`);
+        const st = { ws: w, msgs: [], bin: 0, binBytes: 0, meta: null };
+        w.on('message', (d) => {
+            if (typeof d === 'string' || d[0] === 0 || (d.byteLength === undefined)) {
+                const str = d.toString ? d.toString() : String(d);
+                st.msgs.push(str);
+                if (str.charCodeAt(0) === 0) { try { const p = JSON.parse(str.slice(1)); if (p.type === 'rd-meta') st.meta = p; } catch (e) {} }
+            } else { st.bin++; st.binBytes += d.byteLength || d.length; }
+        });
+        w.binaryType = 'arraybuffer';
+        w.on('open', () => resolve(st));
+        w.on('error', () => resolve(null));
+    });
+    check('rd socket connects with token', !!rdWs);
+    if (rdWs) {
+        let meta = rdWs.meta;
+        for (let i = 0; i < 40 && !meta; i++) { await sleep(100); meta = rdWs.meta; }
+        check('rd-meta announces mime + backends', !!meta && /video\/webm/.test(meta.mime) && meta.capture === 'file' && meta.input === 'echo');
+        for (let i = 0; i < 60 && rdWs.binBytes < 20000; i++) await sleep(100);
+        check('media bytes stream over the socket', rdWs.binBytes > 20000, rdWs.binBytes + ' bytes');
+        rdWs.ws.send(JSON.stringify({ type: 'rd-pointer', x: 0.5, y: 0.5, button: 0, down: true }));
+        let echoed = null;
+        for (let i = 0; i < 40 && !echoed; i++) {
+            await sleep(80);
+            for (const m of rdWs.msgs) if (m.charCodeAt(0) === 0 && m.includes('rd-input-echo')) { echoed = JSON.parse(m.slice(1)); break; }
+        }
+        check('input event round-trips (echo backend)', !!echoed && echoed.ev && echoed.ev.x === 0.5);
+        rdWs.ws.close();
+    }
+    await sleep(400);
+    rdSrv.kill();
+
     console.log(`\n═══ RESULT: ${passed} passed, ${failed} failed ═══`);
     if (serverProc) serverProc.kill();
     process.exit(failed ? 1 : 0);

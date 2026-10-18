@@ -108,6 +108,8 @@ function loadPlaywright() {
     /* E — replay share + public player */
     const url = await page.evaluate(() => api('/api/replay/share', { method: 'POST', body: { title: 'verify replay', events: [{ t: 0, d: 'hello from garuda\r\n' }, { t: 400, d: 'second line of the replay\r\n' }, { t: 800, d: 'done.\r\n' }] } }).then((r) => r.url));
     ck('share url minted', typeof url === 'string' && url.startsWith('/replay.html?r='), url);
+    await page.evaluate(() => { api('/api/files/delete', { method: 'POST', body: { path: 'gk-verify.txt' } }); api('/api/files/delete', { method: 'POST', body: { path: 'gk-verify.txt.bak' } }); api('/api/layouts/verify-layout', { method: 'DELETE' }); });
+    await page.close().catch(() => {}); // free the first renderer before opening the player page (sandbox RAM)
     const page2 = await browser.newPage({ viewport: { width: 900, height: 700 } });
     await page2.goto(`http://localhost:${PORT}${url}`, { waitUntil: 'domcontentloaded' });
     await page2.waitForTimeout(2500);
@@ -116,7 +118,6 @@ function loadPlaywright() {
     const playShot = path.join(SHOTS, 'replay-player.png');
     await page2.screenshot({ path: playShot });
 
-    await page.evaluate(() => { api('/api/files/delete', { method: 'POST', body: { path: 'gk-verify.txt' } }); api('/api/files/delete', { method: 'POST', body: { path: 'gk-verify.txt.bak' } }); api('/api/layouts/verify-layout', { method: 'DELETE' }); });
     console.log('screenshots in', SHOTS);
     const failed = results.filter((r) => !r.ok);
     console.log(`VERIFY RESULT: ${results.length - failed.length}/${results.length} passed`);

@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-    <link rel="stylesheet" href="style.css?v=5.2.1" />
+    <link rel="stylesheet" href="style.css?v=5.3.0" />
 </head>
 <body>
 
@@ -258,6 +258,28 @@
         </div>
 
         <!-- Stats Drawer -->
+        <!-- Remote Desktop (5.3) -->
+        <aside id="rd-drawer" class="drawer rd-drawer hidden" aria-label="Remote Desktop">
+            <div class="drawer-header">
+                <h3><svg class="ic"><use href="#i-monitor"></use></svg> Remote Desktop</h3>
+                <div class="drawer-header-actions">
+                    <span class="ai-model-quick" id="rd-status-chip">idle</span>
+                    <button class="icon-btn" data-action="rd-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+                </div>
+            </div>
+            <div class="rd-stage">
+                <video id="rd-video" playsinline muted autoplay></video>
+                <div class="rd-hint" id="rd-hint">Connect to stream this machine's screen.</div>
+            </div>
+            <div class="rd-toolbar">
+                <button class="btn-mini" data-action="rd-connect" id="rd-connect-btn">▶ Connect</button>
+                <button class="btn-mini hidden" data-action="rd-kbd" id="rd-kbd-btn" title="Capture keyboard (Esc releases)">⌨ Keyboard</button>
+                <button class="btn-mini hidden" data-action="rd-mute" id="rd-mute-btn" title="Unmute system audio">🔇 Muted</button>
+                <button class="btn-mini hidden" data-action="rd-full" id="rd-full-btn" title="Fullscreen">⛶ Full</button>
+                <button class="btn-mini danger-mini hidden" data-action="rd-disconnect" id="rd-disconnect-btn">⏹ Stop</button>
+            </div>
+        </aside>
+
         <aside id="stats-drawer" class="drawer hidden" aria-label="System monitor">
             <div class="drawer-header">
                 <h3><svg class="ic"><use href="#i-activity"></use></svg> System Monitor</h3>
@@ -1422,7 +1444,7 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
-<script src="app.js?v=5.2.1"></script>
-<script src="ui.js?v=5.2.1"></script>
+<script src="app.js?v=5.3.0"></script>
+<script src="ui.js?v=5.3.0"></script>
 </body>
 </html>

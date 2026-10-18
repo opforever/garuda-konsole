@@ -155,6 +155,8 @@ else if (!/api\/replay\//.test(replayHtml)) fail('replay player must fetch /api/
 else ok('standalone replay player present');
 const srvjs = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
 const missingRoutes = ['/api/layouts', '/api/files/write', '/api/processes', '/api/stats/history', '/api/replay/share', '/api/recordings'].filter((r) => !srvjs.includes(r));
+if (!srvjs.includes("url.pathname === '/ws/rd'")) fail('server missing the /ws/rd websocket branch');
+if (!fs.existsSync(path.join(__dirname, 'fixtures', 'rd-test.webm'))) fail('rd test fixture missing — run: node tools/make-rd-fixture.js');
 if (missingRoutes.length) fail('server routes missing: ' + missingRoutes.join(', '));
 else ok('5.2 server routes present (layouts / write / processes / history / replay)');
 const missingFns = ['handleTabHealth', 'openEditor', 'restoreLayout', 'shareReplayLink', 'renderProcList'].filter((f) => !uijs.includes('function ' + f));
