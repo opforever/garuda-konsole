@@ -1,8 +1,8 @@
-# Garuda Konsole 5.3.4 🦅
+# Garuda Konsole 5.3.5 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.3.4-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-460%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.3.5-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-460%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,15 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 🖥️ What's new in 5.3.5 — portal fallback with remember-once approval
+
+Plasma 6.8 moved KWin's screencast D-Bus object (`No such object path
+'/Screencasting'`), so 5.3.4's introspecting script still found nothing on
+some builds. Now the server **auto-falls back**: if the KWin capture dies
+within 8 s having sent zero bytes, it relaunches capture through
+`tools/rd-screencast-portal.sh` — the *standard* xdg-desktop-portal
+ScreenCast flow with a **persisted restore token** (`~/.config/garuda-konsole/rd-restore-token`, mode 600): KDE's approval dialog appears **once**, every later session restores silently. If the KWin path ever works on your build it stays preferred (zero prompts). Failure logs now carry 300-char capture stderr + introspect dumps.
 
 ## 🖥️ What's new in 5.3.4 — self-introspecting KWin screencast script
 

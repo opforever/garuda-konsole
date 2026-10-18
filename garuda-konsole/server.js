@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.3.4';
+const VERSION = '5.3.5';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -1151,11 +1151,26 @@ function rdStart(ws) {
             }
         }, 120);
     } else {
-        const proc = require('child_process').spawn('sh', ['-c', capture.cmd], { stdio: ['ignore', 'pipe', 'pipe'] });
-        rdSession.proc = proc;
-        proc.stdout.on('data', feed);
-        proc.stderr.on('data', (d) => log('[rd-capture] ' + d.toString().slice(0, 200)));
-        proc.on('exit', (code) => rdStop('capture exited ' + code));
+        const startProc = (cmd, canFallback) => {
+            const proc = require('child_process').spawn('sh', ['-c', cmd], { stdio: ['ignore', 'pipe', 'pipe'] });
+            rdSession.proc = proc;
+            proc.stdout.on('data', feed);
+            proc.stderr.on('data', (d) => log('[rd-capture] ' + d.toString().slice(0, 300)));
+            proc.on('exit', (code) => {
+                if (!rdSession) return;
+                const portalScript = path.join(__dirname, 'tools', 'rd-screencast-portal.sh');
+                const early = canFallback && rdSession.bytes === 0 && (Date.now() - rdSession.startedAt) < 8000;
+                if (early && fs.existsSync(portalScript) && rdHasBin('gdbus')) {
+                    log('[rd] capture failed early — falling back to portal ScreenCast (approve once, silent after)');
+                    rdSession.kind = 'cmd-portal';
+                    rdBroadcastCtrl({ type: 'rd-meta', mime: rdSession.mime, width: RD.width, height: RD.height, capture: 'portal', input: rdInputBackend() });
+                    startProc(`sh '${portalScript}'`, false);
+                    return;
+                }
+                rdStop('capture exited ' + code);
+            });
+        };
+        startProc(capture.cmd, true);
     }
     log(`[rd] session started (${capture.kind}, ${mime})`);
 }
