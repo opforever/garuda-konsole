@@ -9,7 +9,7 @@ const WebSocket = require('ws');
 let serverProc = null;
 if (!process.env.BASE) {
     serverProc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-        env: Object.assign({}, process.env, { PORT: String(PORT) }),
+        env: Object.assign({}, process.env, { PORT: String(PORT), KONSOLE_TASK_REMIND_MS: process.env.KONSOLE_TASK_REMIND_MS || '3000' }),
         stdio: ['ignore', 'pipe', 'pipe']
     });
     serverProc.stdout.on('data', () => {});
@@ -536,6 +536,67 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check('interactive task consumed stdin', gotIt);
     rs = await j(`${B}/api/tasks/${interId}/input`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: 'x\n' }) });
     check('input to finished task rejected', rs.status === 400);
+
+    /* ── 5.1.1: live-connection notifications (WS mirror of push events) ──
+       Web Push rides FCM, which is unreachable on some networks; every server
+       alert must ALSO reach open host tabs over the existing WS connections. */
+    console.log('── 5.1.1: live WS notifications (push-service fallback) ──');
+    const nTab = 'gk-notify-tab';
+    const nHost = await wsConnect(`?tabId=${nTab}&auth=${TOK}`);
+    await waitCtrl(nHost.msgs, 'init');
+    const nHost2 = await wsConnect(`?tabId=${nTab}&auth=${TOK}`);
+    await waitCtrl(nHost2.msgs, 'init');
+    rs = await j(`${B}/api/share/create`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ tabId: nTab, mode: 'readonly' }) });
+    const nViewer = await wsConnect(`?shareToken=${rs.body.token}`);
+    await waitCtrl(nViewer.msgs, 'init');
+
+    const notifyFrames = (msgs, tag) => {
+        const out = [];
+        for (const m of msgs) {
+            if (m.charCodeAt(0) !== 0) continue;
+            try { const p = JSON.parse(m.slice(1)); if (p.type === 'notify' && p.tag === tag) out.push(p); } catch (e) {}
+        }
+        return out;
+    };
+    const waitNotifyCount = async (msgs, tag, minCount, timeout = 10000) => {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const frames = notifyFrames(msgs, tag);
+            if (frames.length >= minCount) return frames;
+            await sleep(150);
+        }
+        return notifyFrames(msgs, tag);
+    };
+
+    /* task completion → live notify (no push subscription involved) */
+    rs = await j(`${B}/api/tasks`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'notify-finish', cmd: 'echo NF_DONE' }) });
+    const finId = rs.body.id;
+    let frames = await waitNotifyCount(nHost.msgs, 'task:' + finId, 1, 6000);
+    check('task completion mirrored to live WS clients', frames.length >= 1 && /Task finished/.test(frames[0].title) && frames[0].body.includes('notify-finish'));
+    frames = await waitNotifyCount(nHost2.msgs, 'task:' + finId, 1, 2000);
+    check('every host connection receives the alert', frames.length >= 1);
+    await sleep(400);
+    check('viewers never receive task alerts (host-private)', notifyFrames(nViewer.msgs, 'task:' + finId).length === 0);
+
+    /* waiting task → needs-input alert carrying the prompt line, reminders
+       while still stuck, and re-alert on a SECOND prompt episode */
+    rs = await j(`${B}/api/tasks`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'notify-wait', cmd: `printf 'Password: '; read -r p; printf 'Token: '; read -r t; echo NW_DONE` }) });
+    const waitId = rs.body.id;
+    frames = await waitNotifyCount(nHost.msgs, 'taskwait:' + waitId, 1, 10000);
+    check('waiting task alerts live clients without push', frames.length >= 1 && /needs input/i.test(frames[0].title));
+    check('waiting alert shows the actual prompt line', frames.length >= 1 && frames[0].body.includes('Password:'));
+    frames = await waitNotifyCount(nHost.msgs, 'taskwait:' + waitId, 2, 9000);
+    check('still-waiting task re-alerts (reminder)', frames.length >= 2 && /still needs input/i.test(frames[frames.length - 1].title));
+
+    rs = await j(`${B}/api/tasks/${waitId}/input`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ data: 'hunter2\n' }) });
+    check('answer accepted for waiting task', rs.status === 200 && rs.body.success);
+    const beforeEpisode2 = notifyFrames(nHost.msgs, 'taskwait:' + waitId).length;
+    frames = await waitNotifyCount(nHost.msgs, 'taskwait:' + waitId, beforeEpisode2 + 1, 10000);
+    check('second prompt episode re-notifies (flag reset on output)', frames.length > beforeEpisode2 && frames[frames.length - 1].body.includes('Token:'));
+
+    rs = await j(`${B}/api/tasks/${waitId}/kill`, { method: 'POST', headers: H });
+    check('waiting task killed cleanly', rs.status === 200);
+    nHost.ws.close(); nHost2.ws.close(); nViewer.ws.close();
 
     // rename onto itself = no-op success
     require('fs').writeFileSync('/tmp/gk-rename-self.txt', 'x');

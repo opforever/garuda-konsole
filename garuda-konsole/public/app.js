@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.1.0';
+const APP_VERSION = '5.1.1';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -646,6 +646,40 @@ async function notifyUser(title, body, opts) {
         }
     } catch (e) { /* fall through */ }
     try { new Notification(title, { body: body || '' }); return true; } catch (e) { return false; }
+}
+
+/* ─────────────── Live-connection alerts (server 'notify' mirror) ───────────────
+   Every server push event (tasks waiting/finished, triggers, …) is also
+   broadcast over the existing WebSocket connections. This needs no push
+   service (FCM) and no subscription, so alerts still arrive on networks
+   where Web Push is unreachable — as long as any tab is open. Deduped by
+   tag so N open tabs alert once, and so a locally-handled event (e.g. a
+   trigger this page already toasted/notified) suppresses its server mirror. */
+const recentNotifyTags = new Map();
+function markNotifyTag(tag) {
+    const now = Date.now();
+    if (recentNotifyTags.size > 100) {
+        for (const [k, v] of recentNotifyTags) if (now - v > 15000) recentNotifyTags.delete(k);
+    }
+    recentNotifyTags.set(String(tag), now);
+}
+function notifyTagFresh(tag) {
+    const t = recentNotifyTags.get(String(tag));
+    return !!t && Date.now() - t < 15000;
+}
+function handleServerNotify(ctrl) {
+    const tag = String(ctrl.tag || 'garuda');
+    if (notifyTagFresh(tag)) return;
+    markNotifyTag(tag);
+    const title = String(ctrl.title || 'Garuda Konsole');
+    const body = String(ctrl.body || '');
+    if (document.hidden) {
+        notifyUser(title, body, { tag });
+    } else if (!tag.startsWith('exit:') && !tag.startsWith('trigger:')) {
+        /* Foreground: in-app toast. Shell exits draw their own overlay and
+           triggers already toast locally (fireTrigger) — don't double up. */
+        showToastSafe('info', title, body);
+    }
 }
 
 /* ─────────────── Text-to-speech (Orpheus via server proxy) ─────────────── */
@@ -1861,6 +1895,10 @@ function handleHostCtrl(tab, ctrl) {
             handlePresenceUpdate(ctrl.tabId, ctrl.viewerCount || 0);
             break;
         }
+        case 'notify': {
+            handleServerNotify(ctrl);
+            break;
+        }
         case 'pong': {
             if (typeof ctrl.t === 'number') {
                 tab.latency = Math.max(0, Date.now() - ctrl.t);
@@ -2056,6 +2094,9 @@ function fireTrigger(trig, tab, line) {
     if (acts.sound) playTriggerSound();
     if (acts.notify && document.hidden) {
         notifyUser('⚡ ' + (trig.name || 'Trigger'), `[${tab.title}] ${short}`, { tag: 'trg-' + trig.id });
+        /* Suppress the server-side trigger mirror of this same event (the
+           server tags its push copies 'trigger:<id>'). */
+        markNotifyTag('trigger:' + trig.id);
     }
     bumpInsight('triggers', 1);
     logActivity('warn', `Trigger "${trig.name}" fired in "${tab.title}": ${short.slice(0, 80)}`);

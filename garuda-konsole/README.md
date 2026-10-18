@@ -1,8 +1,8 @@
-# Garuda Konsole 5.0.0 🦅
+# Garuda Konsole 5.1.1 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.0.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-343%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.1.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-363%20passing-2fd07a)
 
 ---
 
@@ -196,7 +196,7 @@ Default password: `20090228` (unchanged). Override everything via env:
 
 ## 🧪 Tests
 ```bash
-npm test           # api-test (131) + frontend-test (212) + static-check
+npm test           # api-test (140) + frontend-test (223) + static-check
 ```
 Each suite boots its own isolated server instance — no manual setup needed.
 The AI E2E tests stub `/api/ai/chat` in-page, so they never consume your Groq quota
@@ -210,6 +210,18 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🩹 What's new in 5.1.1 — notifications that survive blocked push services
+
+Real-world bug report: *"Push subscribe failed — push service error"* and *"no notification when a task needs input"*. Root causes & fixes:
+
+- **Web Push needs FCM, and FCM isn't reachable everywhere** (blocked networks, offline devices). That part is environmental — but alerts no longer depend on it: **every server alert (task waiting / task finished / triggers) is now also mirrored to open tabs over the existing WebSocket connections**. Any open Garuda tab = instant in-app alerts, no push service, no subscription needed. System notifications fire from hidden tabs; a toast appears when you're looking at the app. Viewers never receive them (host-private).
+- **The local fallback for waiting tasks was unreachable dead code**: the Tasks poll only ran while the tab was *visible*, but its notification only fired while the tab was *hidden* — mutually exclusive, so it could never alert. The poll now evaluates waiting-task alerts even when hidden (and skips DOM work), and the 20 s badge poll does the same when the Tasks drawer is closed.
+- **A task that prompts twice only alerted once**: new output cleared the `waiting` flag but not the "already notified" flag, so the second prompt (e.g. password → OTP) was silent. Flags now reset together, and every new prompt episode re-alerts.
+- **Waiting tasks re-alert while still stuck** — a reminder every 5 min (`KONSOLE_TASK_REMIND_MS`, max 3) so a missed first alert never strands a task. The first alert now quotes the actual prompt line.
+- **Honest push settings copy**: when subscribing fails because the push service is unreachable, Settings → Notifications explains that it's a device/network limitation and that in-app alerts over the live connection still work — instead of a scary generic error.
+
+Test totals: API **140** (+9: WS mirror delivery, multi-host broadcast, viewer exclusion, reminders, re-prompt episodes), frontend **223** (+11: hidden-tab notification paths, tag dedup, toast-vs-notification routing, push copy). All new tests were verified to fail against the pre-fix code.
 
 ## What's new in 5.1.0 — voice & model toolkit
 
@@ -225,4 +237,4 @@ Everything below rides on the same three model families (chat: Qwen3.8-27B / GPT
 
 > TTS note: Orpheus needs a **one-time terms acceptance** in the Groq console (the server surfaces the exact URL if it's missing). STT works out of the box.
 
-Test totals: API **131**, frontend **212**, static checks clean.
+Test totals: API **140**, frontend **223**, static checks clean.

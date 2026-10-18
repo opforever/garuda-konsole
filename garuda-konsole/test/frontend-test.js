@@ -1044,6 +1044,90 @@ function visible(win, id) {
     check('model chip reflects the switch', rwin.document.getElementById('ai-model-chip').textContent.includes('gpt-oss-120b'));
     ev(rwin, `window.fetch = window.__origFetch5;`);
 
+    /* ── 5.1.1: live-connection notifications & hidden-tab fallbacks ── */
+    console.log('── 5.1.1: live WS notifications & hidden-tab fallbacks ──');
+    rwin.eval(`
+        window.__nuCalls = [];
+        window.__toastCalls = [];
+        window.__origNotifyUser2 = notifyUser;
+        window.__origToastSafe2 = showToastSafe;
+        notifyUser = function (t, b, o) { window.__nuCalls.push({ t: t, b: b, tag: o && o.tag }); return Promise.resolve(true); };
+        showToastSafe = function (type, title, text) { window.__toastCalls.push({ type: type, title: title, text: text }); };
+        window.__setHidden = function (v) { Object.defineProperty(document, 'hidden', { get: () => v, configurable: true }); };
+        window.__setHidden(true);
+    `);
+    ev(rwin, `handleHostCtrl(tabs[activeTabId], { type: 'notify', title: '⌨️ Task needs input', body: '"build" is waiting at a prompt.', tag: 'taskwait:tkA' })`);
+    await tick(60);
+    check('hidden tab: live WS notify becomes a system notification', ev(rwin, `window.__nuCalls.some(c => c.tag === 'taskwait:tkA' && /needs input/.test(c.t))`) === true);
+    ev(rwin, `handleHostCtrl(tabs[activeTabId], { type: 'notify', title: '⌨️ Task needs input', body: '"build" is waiting at a prompt.', tag: 'taskwait:tkA' })`);
+    await tick(60);
+    check('same event on multiple tabs alerts once (tag dedup)', ev(rwin, `window.__nuCalls.filter(c => c.tag === 'taskwait:tkA').length`) === 1);
+    ev(rwin, `window.__setHidden(false)`);
+    ev(rwin, `handleHostCtrl(tabs[activeTabId], { type: 'notify', title: '✓ Task finished', body: 'build — exit 0 (3s)', tag: 'task:tkB' })`);
+    await tick(60);
+    check('visible tab: live WS notify becomes an in-app toast', ev(rwin, `window.__toastCalls.some(c => /Task finished/.test(c.title))`) === true);
+    check('visible tab: no system notification for the same event', ev(rwin, `window.__nuCalls.some(c => c.tag === 'task:tkB')`) === false);
+    ev(rwin, `handleHostCtrl(tabs[activeTabId], { type: 'notify', title: 'Shell exited', body: 'bye', tag: 'exit:tkC' })`);
+    await tick(60);
+    check('shell-exit mirror does not double-toast in foreground', ev(rwin, `window.__toastCalls.some(c => /Shell exited/.test(c.title))`) === false);
+
+    /* hidden-tab poll fallback: renderTasks / tasksBadgeTick must alert for
+       waiting tasks WITHOUT touching the DOM (regression: the notify branch
+       used to be unreachable dead code — the poll was skipped while hidden) */
+    rwin.eval(`
+        window.__setHidden(true);
+        window.__stubTaskId = 'tk_hidden';
+        document.getElementById('tasks-drawer').classList.add('hidden');
+        const prevF2 = window.fetch;
+        window.__restoreTF2 = function () { window.fetch = prevF2; };
+        window.fetch = function (url, opts) {
+            const u = String(url);
+            if (u.includes('/api/tasks') && (!opts || !opts.method)) {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ tasks: [
+                    { id: window.__stubTaskId, name: 'Hidden waiter', cmd: 'read p', cwd: '/tmp', shell: 'bash', alive: true, waiting: true, exitCode: null, notify: true, elapsedMs: 9000, tail: 'Password: ' }
+                ] }) });
+            }
+            return prevF2(url, opts);
+        };
+        document.getElementById('task-list').innerHTML = '';
+    `);
+    ev(rwin, 'renderTasks()');
+    await tick(300);
+    check('hidden poll fires needs-input notification (was dead code)', ev(rwin, `window.__nuCalls.some(c => c.tag === 'taskwait:tk_hidden')`) === true);
+    check('hidden poll does no DOM rendering', ev(rwin, `document.getElementById('task-list').children.length`) === 0);
+    ev(rwin, `window.__stubTaskId = 'tk_badge'`);
+    ev(rwin, 'tasksBadgeTick()');
+    await tick(300);
+    check('hidden badge poll also fires the alert', ev(rwin, `window.__nuCalls.some(c => c.tag === 'taskwait:tk_badge')`) === true);
+    ev(rwin, `window.__setHidden(false); window.__stubTaskId = 'tk_vis'`);
+    ev(rwin, 'renderTasks()');
+    await tick(300);
+    check('visible renderTasks still renders rows', ev(rwin, `!!document.querySelector('.task-row[data-id="tk_vis"]')`) === true);
+    ev(rwin, `window.__restoreTF2 && window.__restoreTF2(); document.getElementById('task-list').innerHTML = '';`);
+
+    /* push settings copy: unreachable push service → explain the live fallback */
+    rwin.eval(`
+        Object.defineProperty(window, 'isSecureContext', { get: () => true, configurable: true });
+        Object.defineProperty(window, 'PushManager', { value: function PM() {}, configurable: true });
+        const regNull = { showNotification: async () => {}, pushManager: { getSubscription: async () => null } };
+        Object.defineProperty(window.navigator, 'serviceWorker', { value: { ready: Promise.resolve(regNull), getRegistration: async () => regNull }, configurable: true });
+        storeSet('gk_push_lasterr', 'Registration failed - push service error');
+    `);
+    await ev(rwin, 'loadPushStatus()');
+    await tick(250);
+    const pushCopy = String(ev(rwin, `document.getElementById('push-status').textContent`));
+    check('push status explains live-connection fallback when service unreachable', /live connection/i.test(pushCopy), pushCopy.slice(0, 90));
+    ev(rwin, `storeSet('gk_push_lasterr', '')`);
+    await ev(rwin, 'loadPushStatus()');
+    await tick(250);
+    check('push status returns to normal copy after error cleared', /Off — enable/i.test(String(ev(rwin, `document.getElementById('push-status').textContent`))));
+
+    rwin.eval(`
+        notifyUser = window.__origNotifyUser2;
+        showToastSafe = window.__origToastSafe2;
+        delete document.hidden;
+    `);
+
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
     const relevant = fatalErrors.filter((e) => !/Could not load|favicon|Not implemented|blob:fake/i.test(e));

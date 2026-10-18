@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.1.0';
+const VERSION = '5.1.1';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -303,6 +303,30 @@ function sendCtrl(ws, obj) {
 function broadcastCtrl(session, obj) {
     if (!session) return;
     for (const client of session.clients) sendCtrl(client.ws, obj);
+}
+
+/* Live-connection alert channel — complements Web Push. Web Push rides the
+   browser's push service (FCM on Android Chrome), which is unreachable on
+   some networks and needs a working per-device subscription; this delivers
+   the same alerts to every open host/pair tab instantly over the WebSocket
+   connections that already exist. Viewers are excluded: task names, prompts
+   and trigger lines are host-private. */
+function notifyClients(title, body, tag) {
+    const msg = {
+        type: 'notify',
+        title: String(title || 'Garuda Konsole').slice(0, 120),
+        body: String(body || '').slice(0, 300),
+        tag: String(tag || 'garuda').slice(0, 100)
+    };
+    let n = 0;
+    for (const session of sessions.values()) {
+        for (const client of session.clients) {
+            if (client.role === 'viewer') continue;
+            sendCtrl(client.ws, msg);
+            n++;
+        }
+    }
+    return n;
 }
 
 function broadcastRaw(session, data) {
@@ -1442,7 +1466,15 @@ function savePushSubscriptions(list) {
     saveConfigFile(cfg);
 }
 
-async function pushNotify(title, body, tag) {
+async function pushNotify(title, body, tag, opts) {
+    /* Mirror every alert to live-connected clients too, so task/trigger events
+       reach open tabs even when the push service is unreachable from the
+       device's network or no subscription exists. (Shell-exit and
+       command-finished callers only fire when NO client is connected, so
+       this never doubles up with those.) */
+    if (!opts || opts.live !== false) {
+        try { notifyClients(title, body, tag); } catch (e) {}
+    }
     if (!webpush) return 0;
     const subs = getPushSubscriptions();
     if (!subs.length) return 0;
@@ -1498,7 +1530,7 @@ app.get('/api/push/status', requireAuth, (req, res) => {
 });
 
 app.post('/api/push/test', requireAuth, async (req, res) => {
-    const sent = await pushNotify('Garuda Konsole', 'Background push is working! 🦅', 'test');
+    const sent = await pushNotify('Garuda Konsole', 'Background push is working! 🦅', 'test', { live: false });
     res.json({ success: sent > 0, sent });
 });
 
@@ -1534,7 +1566,10 @@ function runTask(opts) {
         ptyProcess: null,
         lastOutputAt: 0,
         waiting: false,
-        waitingNotified: false
+        waitingNotified: false,
+        waitSince: 0,
+        waitRemindAt: 0,
+        waitReminds: 0
     };
     tasks.set(id, task);
 
@@ -1551,7 +1586,10 @@ function runTask(opts) {
                 task.bufBytes -= task.buf.shift().length;
             }
             task.lastOutputAt = Date.now();
-            if (task.waiting) { task.waiting = false; }
+            /* Fresh output ends the current waiting episode AND re-arms its
+               notification — otherwise a task that prompts a second time
+               (e.g. password, then OTP) would never alert again. */
+            if (task.waiting) { task.waiting = false; task.waitingNotified = false; task.waitReminds = 0; }
         });
         proc.onExit(({ exitCode }) => {
             task.alive = false;
@@ -1645,10 +1683,16 @@ app.post('/api/tasks/:id/input', requireAuth, (req, res) => {
     try { t.ptyProcess.write(data); } catch (e) { return res.status(500).json({ error: 'Write failed' }); }
     t.waiting = false;
     t.waitingNotified = false;
+    t.waitReminds = 0;
     res.json({ success: true });
 });
 
-/* Detect tasks that are sitting at an interactive prompt and push about it */
+/* Detect tasks that are sitting at an interactive prompt and alert about it.
+   Alerts ride BOTH channels: Web Push (browser fully closed) and the live WS
+   mirror inside pushNotify (any open tab — works on networks where the push
+   service is unreachable). A periodic reminder re-alerts while the task is
+   still stuck, so a missed first alert never strands the task forever. */
+const TASK_REMIND_MS = Math.max(3000, parseInt(process.env.KONSOLE_TASK_REMIND_MS || '300000', 10) || 300000);
 const taskWaitTracker = setInterval(() => {
     const now = Date.now();
     for (const t of tasks.values()) {
@@ -1661,8 +1705,17 @@ const taskWaitTracker = setInterval(() => {
             t.waiting = true;
             if (!t.waitingNotified) {
                 t.waitingNotified = true;
-                pushNotify('⌨️ Task needs input', `"${t.name}" is waiting at a prompt. Open Tasks to answer.`, 'taskwait:' + t.id).catch(() => {});
+                t.waitSince = now;
+                t.waitRemindAt = now;
+                t.waitReminds = 0;
+                const lines = plain.split('\n').map((l) => l.replace(/\r/g, '').trim()).filter(Boolean);
+                const promptLine = (lines[lines.length - 1] || '').slice(0, 80);
+                pushNotify('⌨️ Task needs input', `"${t.name}" is waiting at a prompt${promptLine ? ` — "${promptLine}"` : ''}. Open Tasks to answer.`, 'taskwait:' + t.id).catch(() => {});
             }
+        } else if (t.waiting && t.waitingNotified && t.waitReminds < 3 && now - (t.waitRemindAt || now) >= TASK_REMIND_MS) {
+            t.waitReminds++;
+            t.waitRemindAt = now;
+            pushNotify('⌨️ Task still needs input', `"${t.name}" has been waiting at a prompt for ${fmtDur(now - (t.waitSince || t.startedAt))}. Open Tasks to answer.`, 'taskwait:' + t.id).catch(() => {});
         } else if (!looks && t.waiting && idle < 3000) {
             t.waiting = false;
         }

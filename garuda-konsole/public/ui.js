@@ -3938,25 +3938,53 @@ function toggleTasks() {
 
 function startTasksPoll() {
     stopTasksPoll();
-    tasksTimer = setInterval(() => { if (!document.hidden) renderTasks(); }, 2500);
+    /* Tick even while the tab is hidden: renderTasks() fetches and evaluates
+       waiting-task alerts regardless, and skips only the DOM work when hidden.
+       (It used to skip the whole tick when hidden — but hidden is exactly when
+       the alerts matter, so the local fallback could never fire.) */
+    tasksTimer = setInterval(() => { renderTasks(); }, 2500);
 }
 function stopTasksPoll() { if (tasksTimer) { clearInterval(tasksTimer); tasksTimer = null; } }
 
 function startTasksBadgePoll() {
     if (tasksBadgeTimer) return;
-    tasksBadgeTimer = setInterval(() => {
-        if (document.hidden || !token || isViewerSession) return;
-        const drawer = $('tasks-drawer');
-        if (drawer && !drawer.classList.contains('hidden')) return; // live poll already on
-        api('/api/tasks').then((d) => {
-            const running = (d.tasks || []).filter((t) => t.alive).length;
-            const badge = $('tasks-badge');
-            if (badge) {
-                badge.textContent = String(running);
-                badge.classList.toggle('hidden', running === 0);
-            }
-        }).catch(() => {});
-    }, 20000);
+    tasksBadgeTimer = setInterval(() => { tasksBadgeTick(); }, 20000);
+}
+async function tasksBadgeTick() {
+    if (!token || isViewerSession) return;
+    const drawer = $('tasks-drawer');
+    if (drawer && !drawer.classList.contains('hidden')) return; // live poll already on
+    let d;
+    try { d = await api('/api/tasks'); } catch (e) { return; }
+    const list = d.tasks || [];
+    /* Waiting-task alerts are evaluated even while hidden (fallback channel
+       for when the live WS notify was missed); DOM only updates in front. */
+    checkWaitingTaskAlerts(list);
+    if (document.hidden) return;
+    const running = list.filter((t) => t.alive).length;
+    const badge = $('tasks-badge');
+    if (badge) {
+        badge.textContent = String(running);
+        badge.classList.toggle('hidden', running === 0);
+    }
+}
+
+/* Local fallback alert for tasks stuck at a prompt. The primary channel is
+   the server's live WS 'notify' mirror (instant, no push service needed);
+   this poll covers a temporarily-down WS. The tag matches the server's
+   ('taskwait:<id>') and the WS dedup registry is consulted, so the same
+   event never alerts twice. Only fires while the tab is hidden — in front,
+   the row's "needs input" chip + WS toast already tell the story. */
+function checkWaitingTaskAlerts(tasksList) {
+    for (const t of tasksList) {
+        if (t.waiting && document.hidden && !taskWaitNotified.has(t.id)) {
+            const tag = 'taskwait:' + t.id;
+            taskWaitNotified.add(t.id);
+            if (typeof notifyTagFresh === 'function' && notifyTagFresh(tag)) continue; // WS mirror already alerted
+            notifyUser('⌨️ Task needs input', `"${t.name}" is waiting at a prompt.`, { tag });
+        }
+        if (!t.waiting && taskWaitNotified.has(t.id)) taskWaitNotified.delete(t.id);
+    }
 }
 
 function buildTaskRow(t) {
@@ -4017,23 +4045,21 @@ async function renderTasks() {
     if (!list) return;
     let data;
     try { data = await api('/api/tasks'); } catch (e) {
+        if (document.hidden) return; // background poll failure: stay silent
         list.innerHTML = `<div class="activity-empty">${escHtml(e.message || 'Failed to load')}</div>`;
         return;
     }
     const tasksList = (data.tasks || []).slice(0, 40);
+    /* Waiting-task alerts run even while the tab is hidden — that is exactly
+       when they matter (this used to be unreachable dead code: the poll only
+       ran while visible, the notify only fired while hidden). */
+    checkWaitingTaskAlerts(tasksList);
+    if (document.hidden) return; // no DOM churn for a hidden tab
     const badge = $('tasks-badge');
     if (badge) {
         const running = (data.tasks || []).filter((t) => t.alive).length;
         badge.textContent = String(running);
         badge.classList.toggle('hidden', running === 0);
-    }
-
-    for (const t of tasksList) {
-        if (t.waiting && document.hidden && !taskWaitNotified.has(t.id)) {
-            taskWaitNotified.add(t.id);
-            notifyUser('⌨️ Task needs input', `"${t.name}" is waiting at a prompt.`, { tag: 'taskwait-' + t.id });
-        }
-        if (!t.waiting && taskWaitNotified.has(t.id)) taskWaitNotified.delete(t.id);
     }
 
     const ids = new Set(tasksList.map((t) => t.id));
@@ -4334,9 +4360,14 @@ async function loadPushStatus() {
         const sub = reg ? await reg.pushManager.getSubscription() : null;
         const st = await api('/api/push/status');
         if (toggle) { toggle.disabled = false; toggle.checked = !!sub; }
-        status.textContent = sub
-            ? `✓ This device is subscribed (${st.count} device${st.count === 1 ? '' : 's'} total)`
-            : 'Off — enable to get pushes with the browser closed.';
+        if (sub) {
+            status.textContent = `✓ This device is subscribed (${st.count} device${st.count === 1 ? '' : 's'} total)`;
+        } else {
+            const lastErr = String(storeGet('gk_push_lasterr', '') || '');
+            status.textContent = /push service|registration failed|network|terms|service unavailable/i.test(lastErr)
+                ? 'Background push can’t reach the push service from this device/network (e.g. FCM blocked). Task & trigger alerts still arrive in-app over the live connection while any tab is open — you can retry later.'
+                : 'Off — enable to get pushes with the browser closed.';
+        }
     } catch (e) {
         status.textContent = 'Status unavailable: ' + (e.message || '');
     }
@@ -4378,13 +4409,19 @@ async function togglePush(on) {
                 throw new Error(msg);
             }
             await api('/api/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
+            storeSet('gk_push_lasterr', '');
             showToast({ type: 'success', title: 'Background push enabled', text: 'Tasks, triggers & finished commands will reach this device.' });
             logActivity('success', 'Web push enabled on this device');
         } catch (err) {
             const msg = err.message || String(err);
             storeSet('gk_push_lasterr', msg);
-            const hint = /terms|service unavailable|push service|network/i.test(msg) ? ' — push service unreachable from this device/network, or VAPID terms pending' : '';
-            showToast({ type: 'error', title: 'Push subscribe failed', text: msg.slice(0, 120) + hint, duration: 7000 });
+            if (/terms|service unavailable|push service|registration failed|network/i.test(msg)) {
+                /* Typically FCM being unreachable (blocked network / offline).
+                   Not a server bug — and alerts still work over the live WS. */
+                showToast({ type: 'warn', title: 'Background push unavailable here', text: 'This device can’t reach the push service (FCM) — a network/browser limitation. Alerts still reach you in-app over the live connection while any Garuda tab is open.', duration: 9000 });
+            } else {
+                showToast({ type: 'error', title: 'Push subscribe failed', text: msg.slice(0, 120), duration: 7000 });
+            }
         }
         loadPushStatus();
     } else {
