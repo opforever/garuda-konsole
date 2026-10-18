@@ -351,22 +351,36 @@ Test totals: API **140**, frontend **223**, static checks clean.
 
 - **Node is preinstalled** in the image (`/usr/local/bin/node`, v20.x) with npm
   and registry access. There is **no browser** — see §3.
-- **Only `"$ARENA_WORKSPACE"` (the workspace) persists across sessions.** `/tmp`,
-  installed npm packages, downloaded Chromium, background processes: all gone
-  next session. Re-run `sh tools/browser-env.sh` and
-  `sh test/setup-sandbox.sh` at session start.
+- **Only `/home/user` (the workspace) persists across sessions.** `/tmp`,
+  background processes and the downloaded Chromium: all gone next session.
+  Two nuances:
+  - **npm packages do NOT persist if installed as `node_modules`** — the
+    workspace snapshot excludes directories named `node_modules` (and
+    `dist`, `build`, `out`, …). That is why project deps are reinstalled per
+    session (`sh test/setup-sandbox.sh`), and why the persisted
+    playwright-core copy lives at **`vendor/playwright-core`** (a name the
+    snapshot keeps; not in git on purpose). `tools/browser-env.sh` and the
+    `tools/repro-*.js` harnesses resolve it via relative paths.
+  - **The Chromium binaries can NOT be persisted**: 273 MB extracted (~120 MB
+    compressed) vs the ~128 MB best-effort workspace-snapshot cap — storing
+    them risks truncating the entire workspace backup (the repo included).
+    They are re-downloaded per session by `sh tools/browser-env.sh`
+    (~3-4 min, hands-off) into `/tmp/.cache/ms-playwright`.
+  So at session start: `sh test/setup-sandbox.sh && sh tools/browser-env.sh`.
 - **Path-literal remap quirk (biggest trap).** The tool layer rewrites
-  `"$ARENA_WORKSPACE"` literals inside *bash command text* to the real tenant mount
-  (`"$ARENA_WORKSPACE"`), but does **not** rewrite file contents written by the
-  file tools. Consequences observed:
+  `/home/user` literals inside *bash command text* to the real tenant mount
+  (a `/tmp/arena/tenants/…/workspace` path), but does **not** rewrite file
+  contents written by the file tools. Consequences observed:
   | What you did | Result |
   |---|---|
-  | `node -e "…'"$ARENA_WORKSPACE"/x'…"` inline | works (literal rewritten, bash re-expands) |
-  | `cat > f.js <<'EOF'` heredoc containing `"$ARENA_WORKSPACE"` | file corrupted with literal `"$ARENA_WORKSPACE"` |
-  | script file (written via file tool) using `"$ARENA_WORKSPACE"/…` at runtime | `ENOENT` / `existsSync:false` — node's view has no such path |
+  | `node -e "…'/home/user/x'…"` inline | works (literal rewritten, bash re-expands) |
+  | `cat > f.js <<'EOF'` heredoc containing `/home/user` | file corrupted with literal `"$ARENA_WORKSPACE"` |
+  | script file (written via file tool) using `/home/user/…` at runtime | `ENOENT` / `existsSync:false` — node's view has no such path |
   | script deriving paths from `__dirname` / `process.cwd()` / `process.env` | always works |
   **Rule: never hardcode absolute workspace paths in scripts; derive them at
-  runtime.** (This cost hours: spawn `ENOENT` red herrings, corrupted files.)
+  runtime.** Same reason: never author repo-file content through bash
+  heredocs — this very handbook section was born corrupted by one (its
+  `/home/user` mentions arrived as `"$ARENA_WORKSPACE"`); use the file tools.
 - **Missing CLI tools:** no `curl`, `wget`, `pkill`, `pgrep`, `file`, `nc`.
   Use `node -e "fetch(…)"` for HTTP; kill processes by scanning `/proc`:
   `for d in /proc/[0-9]*; do tr '\0' ' ' < "$d/cmdline" | grep -q server.js && kill -9 ${d#/proc/}; done`
@@ -374,8 +388,9 @@ Test totals: API **140**, frontend **223**, static checks clean.
 
 ## 3. Visual verification playbook (how the AI "sees" the UI)
 
-- `sh tools/browser-env.sh` — installs `playwright-core` + headless Chromium
-  into `/tmp` (idempotent; needed once per session).
+- `sh tools/browser-env.sh` — resolves the persisted workspace copy of
+  `playwright-core` (`vendor/playwright-core`, 14 MB) and downloads headless
+  Chromium into `/tmp` only if not cached (idempotent; once per session).
 - `node tools/repro-context-menu.js` — boots server+app headless, logs in,
   right-clicks the terminal, dumps computed color/opacity/cursor of every menu
   entry, saves full + cropped screenshots.

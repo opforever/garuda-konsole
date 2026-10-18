@@ -11,10 +11,13 @@ const fs = require('fs');
 const path = require('path');
 
 function loadPlaywright() {
-    try { return require('playwright-core'); } catch (e) {}
-    for (const p of ['/tmp/pwenv/node_modules/playwright-core', '/tmp/node_modules/playwright-core']) {
-        try { return require(p); } catch (e) {}
-    }
+    const candidates = [
+        'playwright-core',
+        path.join(__dirname, '..', '..', '..', 'vendor', 'playwright-core'), // persisted workspace copy
+        '/tmp/pwenv/node_modules/playwright-core',
+        '/tmp/node_modules/playwright-core'
+    ];
+    for (const p of candidates) { try { return require(p); } catch (e) {} }
     throw new Error('playwright-core not found — run: sh tools/browser-env.sh');
 }
 
