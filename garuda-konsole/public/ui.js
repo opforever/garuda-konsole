@@ -885,7 +885,7 @@ function buildPaletteItems(query) {
     for (const m of getMacros()) pushScored({ sec: 'Macros', icon: '#i-play', title: m.name, sub: m.cmd, kw: m.cmd, run: () => { runCommandInActiveTab(m.cmd); closePalette(); } }, `${m.name} ${m.cmd}`);
     pushScored({ sec: 'Voice', icon: '#i-chat', title: 'Read last output aloud', sub: 'text-to-speech', kw: 'speak tts voice read aloud output', run: () => { closePalette(); speakLastOutput(); } }, 'speak read aloud output tts');
     pushScored({ sec: 'Voice', icon: '#i-chat', title: 'Dictate a shell command', sub: 'voice → confirm → run', kw: 'voice dictation whisper command microphone', run: () => { closePalette(); aiMicToggle('cmd'); } }, 'voice dictate command whisper');
-    pushScored({ sec: 'Voice', icon: '#i-download', title: 'Save last AI reply as MP3', sub: 'download spoken audio', kw: 'mp3 export download voice reply', run: () => { closePalette(); const it = aiState.ui.slice().reverse().find((i) => i.text); if (it) downloadTextAsMp3(it.text, it.id); else showToast({ type: 'info', title: 'No AI reply to export yet' }); } }, 'mp3 export reply voice');
+    pushScored({ sec: 'Voice', icon: '#i-download', title: 'Save last AI reply as audio (WAV)', sub: 'download spoken audio', kw: 'wav mp3 export download voice reply', run: () => { closePalette(); const it = aiState.ui.slice().reverse().find((i) => i.text); if (it) downloadTextAsMp3(it.text, it.id); else showToast({ type: 'info', title: 'No AI reply to export yet' }); } }, 'mp3 export reply voice');
     for (const r of getRecentCommands().slice(0, 40)) pushScored({ sec: 'Recent', icon: '#i-clock', title: r, sub: 'run again', kw: r, run: () => { runCommandInActiveTab(r); closePalette(); } }, r);
     if (q) {
         for (const id of Object.keys(BUILTIN_THEMES)) pushScored({ sec: 'Themes', icon: '#i-palette', title: BUILTIN_THEMES[id].name, sub: 'switch theme', kw: 'theme color ' + id, run: () => { applyTheme(id); showToast({ type: 'success', title: 'Theme applied', text: BUILTIN_THEMES[id].name, duration: 2200 }); } }, BUILTIN_THEMES[id].name + ' theme ' + id);
@@ -3567,7 +3567,7 @@ function renderAiMessages() {
             d.innerHTML = `<div class="ai-bubble">${escHtml(item.text)}</div>`;
         } else if (item.kind === 'assistant') {
             d = el('div', 'ai-msg assistant');
-            d.innerHTML = `<div class="ai-bubble">${aiFormatText(item.text)}<span class="ai-bubble-btns"><button class="ai-speak-btn" data-action="ai-speak" data-id="${item.id}" title="Read aloud">🔊</button><button class="ai-speak-btn ai-mp3-btn" data-action="ai-mp3" data-id="${item.id}" title="Save as MP3">⬇</button></span></div>`;
+            d.innerHTML = `<div class="ai-bubble">${aiFormatText(item.text)}<span class="ai-bubble-btns"><button class="ai-speak-btn" data-action="ai-speak" data-id="${item.id}" title="Read aloud">🔊</button><button class="ai-speak-btn ai-mp3-btn" data-action="ai-mp3" data-id="${item.id}" title="Save as audio (WAV)">⬇</button></span></div>`;
         } else if (item.kind === 'sys') {
             d = el('div', 'ai-msg sysmsg' + (item.level === 'error' ? ' error' : ''));
             d.innerHTML = `<div class="ai-bubble">${escHtml(item.text)}</div>`;
@@ -3701,7 +3701,13 @@ async function loadAiConfig() {
                         o.textContent = v;
                         voiceSel.appendChild(o);
                     });
-                    voiceSel.value = getSettings().aiVoiceName || 'tara';
+                    /* Saved voice may be retired upstream (e.g. the old 'tara'
+                       catalog) — snap the picker to the first valid option
+                       instead of showing a blank select. */
+                    const saved = getSettings().aiVoiceName;
+                    voiceSel.value = Array.from(voiceSel.options).some((o) => o.value === saved)
+                        ? saved
+                        : ((cat.tts.voices && cat.tts.voices[0]) || 'autumn');
                 }
             } catch (e) {}
             if (Array.from(modelSel.options).some((o) => o.value === cfg.model)) modelSel.value = cfg.model;

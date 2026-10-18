@@ -1,8 +1,8 @@
-# Garuda Konsole 5.1.2 🦅
+# Garuda Konsole 5.1.3 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.1.2-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-370%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.1.3-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-376%20passing-2fd07a)
 
 ---
 
@@ -32,7 +32,7 @@ Detached background jobs in their own ptys with ring-buffered tails, kill/re-run
 | Family | Models | What it powers |
 |---|---|---|
 | Chat / agent | `qwen/qwen3.8-27b` (default), `openai/gpt-oss-120b`, `openai/gpt-oss-20b` + custom ids | the AI Guide (pick in Settings → AI Guide) |
-| TTS | `canopylabs/orpheus-v1-english` (8 voices) | **voice replies**: toggle “Voice replies” or tap 🔊 on any assistant message |
+| TTS | `canopylabs/orpheus-v1-english` (6 voices) | **voice replies**: toggle “Voice replies” or tap 🔊 on any assistant message |
 | STT | `whisper-large-v3-turbo`, `whisper-large-v3` | **mic dictation**: the 🎙 button in the AI input bar transcribes your speech into the prompt |
 
 All audio proxies through the server (key never leaves it). *Orpheus needs a one-time terms acceptance in your Groq console — the app shows the exact upstream hint until then.*
@@ -196,11 +196,11 @@ Default password: `20090228` (unchanged). Override everything via env:
 
 ## 🧪 Tests
 ```bash
-npm test           # api-test (140) + frontend-test (230) + static-check
+npm test           # api-test (143) + frontend-test (233) + static-check
 ```
 Each suite boots its own isolated server instance — no manual setup needed.
 The AI E2E tests stub `/api/ai/chat` in-page, so they never consume your Groq quota
-(the API suite makes exactly two tiny live calls to verify the proxy).
+(the API suite makes a handful of tiny live calls to verify the proxies).
 Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in a child_process stub).
 
 ## 🔐 Security notes
@@ -210,6 +210,23 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🩹 What's new in 5.1.3 — voice replies & MP3 export work again (upstream churn)
+
+Real-world bug report: *"MP3 failed — voice must be one of the following voices: [autumn diana hannah austin daniel troy]"*.
+
+Groq churned the Orpheus TTS API twice, and the app had the old contract hardcoded:
+
+- **Voice catalog retired**: the original eight voices (`tara`, `leah`, `jordan`, `kyle`, `carlos`, `annie`, `matthew`, `nicole`) are gone — upstream now accepts only **`autumn`, `diana`, `hannah`, `austin`, `daniel`, `troy`**. Every TTS request (🔊 voice replies, ⬇ MP3 export, "read last output aloud") failed with the error above — even the default voice was a dead one.
+- **MP3 output retired**: `response_format` now only accepts **`wav`** — discovered live while testing the voice fix.
+
+Fixes:
+- Server catalog updated to the six current voices; default is `autumn`. Unknown/retired voices in a request (or in your saved settings) are mapped onto the catalog instead of being forwarded to fail.
+- **Self-healing against future churn**: if upstream ever rejects a voice again, the server retries once with its current default before giving up (a voice error can no longer hard-fail TTS).
+- Speech endpoint now requests/serves **WAV**; the download button saves `garuda-voice-*.wav` (extension follows the served content-type), labels/toasts say "audio (WAV)" instead of MP3. Playback paths are format-agnostic and unchanged.
+- The voice picker in Settings populates from the server catalog (as before) and a stale saved voice now snaps to the first valid option instead of showing a blank select.
+
+Tests (+6 net; verified red against pre-fix code — the old code reproduces the exact upstream error): API **143** (catalog currency, retired-voice exclusion, legacy-voice mapping with a live upstream call, current-voice live call), frontend **233** (default voice, picker normalization, `.wav` download naming).
 
 ## 🩹 What's new in 5.1.2 — stop painting pixels nobody can see
 
@@ -245,7 +262,7 @@ Everything below rides on the same three model families (chat: Qwen3.8-27B / GPT
 - **Transcribe audio files in the file manager** — any `.mp3/.wav/.m4a/.webm/.ogg/.flac/...` row now has a 💬 transcribe button (server-side, new `GET /api/files/transcribe?path=`, 20 MB cap, auth + rate limited). Result opens in the preview modal.
 - **Quick model switcher in the AI drawer** — select next to the model chip; changes the server-side conversation model instantly (no Settings dive).
 - **Explain before you run** — every pending approval card has a ❔ Explain button: the chat model describes what the command does and its risks, inline on the card.
-- **Voice demo with real artifacts** — `node test/voice-demo.js` boots the server, transcribes a real spoken fixture through your Groq key and writes `test/out/transcription.txt` (+ attempts an MP3 render → `test/out/tts-sample.mp3` once Orpheus terms are accepted).
+- **Voice demo with real artifacts** — `node test/voice-demo.js` boots the server, transcribes a real spoken fixture through your Groq key and writes `test/out/transcription.txt` (+ attempts an audio render → `test/out/tts-sample.wav` once Orpheus terms are accepted).
 
 > TTS note: Orpheus needs a **one-time terms acceptance** in the Groq console (the server surfaces the exact URL if it's missing). STT works out of the box.
 

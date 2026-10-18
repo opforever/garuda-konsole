@@ -973,17 +973,17 @@ function visible(win, id) {
     check('speakLastOutput speaks the screen tail', ev(rwin, `window.__spoke.join('|')`).includes('OUT_LINE_A') && ev(rwin, `window.__spoke.join('|')`).includes('OUT_LINE_B'));
     ev(rwin, `speakText = window.__origSpeak;`);
 
-    /* MP3 export of any text (AI replies) */
+    /* Audio export of any text (AI replies) — WAV since Groq retired Orpheus MP3 */
     ev(rwin, `(function(){ window.__origFetch2 = window.fetch; window.__mp3req = null; window.__dl = null;
-        window.fetch = async (u, o) => { if (String(u).includes('/api/ai/speech')) { window.__mp3req = { u: String(u), body: String(o && o.body) }; return { ok: true, blob: async () => ({ size: 1234 }) }; } return window.__origFetch2(u, o); };
+        window.fetch = async (u, o) => { if (String(u).includes('/api/ai/speech')) { window.__mp3req = { u: String(u), body: String(o && o.body) }; return { ok: true, headers: { get: (h) => (String(h).toLowerCase() === 'content-type' ? 'audio/wav' : null) }, blob: async () => ({ size: 1234 }) }; } return window.__origFetch2(u, o); };
         URL.createObjectURL = () => 'blob:fake'; URL.revokeObjectURL = () => {};
         HTMLAnchorElement.prototype.click = function () { window.__dl = this.download; };
     })()`);
     ev(rwin, `downloadTextAsMp3('Export this reply', 'item9')`);
     await tick(80);
-    check('mp3 export calls the speech endpoint', String(ev(rwin, `window.__mp3req && window.__mp3req.u`)).includes('/api/ai/speech'));
-    check('mp3 export sends the text', String(ev(rwin, `window.__mp3req && window.__mp3req.body`)).includes('Export this reply'));
-    check('mp3 export downloads a named .mp3', String(ev(rwin, `window.__dl`)).endsWith('.mp3') && String(ev(rwin, `window.__dl`)).includes('item9'));
+    check('voice export calls the speech endpoint', String(ev(rwin, `window.__mp3req && window.__mp3req.u`)).includes('/api/ai/speech'));
+    check('voice export sends the text', String(ev(rwin, `window.__mp3req && window.__mp3req.body`)).includes('Export this reply'));
+    check('voice export downloads a named .wav (matches served format)', String(ev(rwin, `window.__dl`)).endsWith('.wav') && String(ev(rwin, `window.__dl`)).includes('item9'));
     ev(rwin, `window.fetch = window.__origFetch2;`);
 
     /* voice command → confirm gate → runs (and cancel path) */
@@ -1029,15 +1029,21 @@ function visible(win, id) {
     /* drawer quick-model select */
     ev(rwin, `(function(){ const of = window.fetch; window.__origFetch5 = of; window.__cfgPosts = [];
         window.fetch = function(u, o) { const su = String(u);
-            if (su.includes('/api/ai/models')) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ models: [{ id: 'qwen/qwen3.8-27b', name: 'Qwen3.8 27B' }, { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B' }, { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B' }], tts: { voices: ['tara'] }, stt: { models: ['whisper-large-v3-turbo'] } }) });
+            if (su.includes('/api/ai/models')) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ models: [{ id: 'qwen/qwen3.8-27b', name: 'Qwen3.8 27B' }, { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B' }, { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B' }], tts: { voices: ['autumn', 'diana'] }, stt: { models: ['whisper-large-v3-turbo'] } }) });
             if (su.includes('/api/ai/config') && o && o.method === 'POST') { const b = typeof o.body === 'string' ? o.body : '{}'; window.__cfgPosts.push(b); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(JSON.parse(b)) }); }
             if (su.includes('/api/ai/config')) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ hasKey: true, keyPreview: 'gsk_ab…cd', keySource: 'config', model: 'openai/gpt-oss-20b', maxTokens: 800 }) });
             return of.apply(null, arguments); };
     })()`);
+    ev(rwin, `saveSettings({ aiVoiceName: 'tara' })`);   // a retired legacy voice, as saved by pre-5.1.3 builds
     ev(rwin, `loadAiConfig()`);
     await tick(120);
     check('quick model select populated', ev(rwin, `document.getElementById('ai-model-quick').options.length`) === 3);
     check('quick model select visible with active model', !ev(rwin, `document.getElementById('ai-model-quick').classList.contains('hidden')`) && ev(rwin, `document.getElementById('ai-model-quick').value`) === 'openai/gpt-oss-20b');
+    /* ── 5.1.3: voice catalog churn ── */
+    check('default voice is from the current catalog', ev(rwin, `DEFAULT_SETTINGS.aiVoiceName`) === 'autumn');
+    check('voice picker populated from server catalog', ev(rwin, `document.getElementById('setting-ai-voice').options.length`) === 2);
+    check('retired saved voice snaps to first valid option', ev(rwin, `document.getElementById('setting-ai-voice').value`) === 'autumn');
+    ev(rwin, `saveSettings({ aiVoiceName: 'autumn' })`);
     ev(rwin, `(function(){ const s = document.getElementById('ai-model-quick'); s.value = 'openai/gpt-oss-120b'; s.dispatchEvent(new Event('change')); })()`);
     await tick(120);
     check('model switch posted to server config', ev(rwin, `window.__cfgPosts.length`) === 1 && String(ev(rwin, `window.__cfgPosts[0]`)).includes('gpt-oss-120b'));

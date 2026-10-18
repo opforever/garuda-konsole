@@ -651,6 +651,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     rs = await j(`${B}/api/ai/models`, { headers: H });
     check('model catalog served', rs.status === 200 && rs.body.models.some((m) => m.id === 'openai/gpt-oss-120b') && rs.body.models.some((m) => m.id === 'openai/gpt-oss-20b') && rs.body.models.some((m) => m.id === 'qwen/qwen3.8-27b'));
     check('tts voices + stt models listed', rs.body.tts.voices.length >= 4 && rs.body.stt.models.includes('whisper-large-v3-turbo'));
+    /* 5.1.3: the catalog must track upstream — Groq retired the original eight
+       Orpheus voices (tara/leah/…), which made every TTS & MP3-export request
+       fail with "voice must be one of the following voices: […]". */
+    check('tts catalog is the current upstream voice set', ['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'].every((v) => rs.body.tts.voices.includes(v)));
+    check('tts catalog dropped the retired voices', !rs.body.tts.voices.some((v) => ['tara', 'leah', 'jordan', 'kyle', 'carlos', 'annie', 'matthew', 'nicole'].includes(v)));
 
     // STT round-trip with a silent wav (plumbing test)
     const mkWav = () => {
@@ -678,14 +683,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     rs = await j(`${B}/api/files/transcribe?path=${encodeURIComponent(fixturePath)}`);
     check('files/transcribe requires auth', rs.status === 401);
 
-    // TTS: either audio (terms accepted) or a descriptive upstream error — never a crash
+    /* TTS: either audio (terms accepted) or a descriptive upstream error — never
+       a crash. 'tara' is a RETIRED legacy voice: the server must map it onto the
+       current catalog instead of forwarding it (that forward was the MP3 bug —
+       upstream answered "voice must be one of the following voices"). */
     const sr = await fetch(`${B}/api/ai/speech`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hello', voice: 'tara' }) });
     if (sr.status === 200) {
         const ab = Buffer.from(await sr.arrayBuffer());
-        check('orpheus speech returns audio', ab.length > 500 && (sr.headers.get('content-type') || '').includes('audio'));
+        check('legacy voice "tara" maps onto the catalog and returns audio', ab.length > 500 && (sr.headers.get('content-type') || '').includes('audio'));
     } else {
         const sj = await sr.json();
-        check('orpheus speech fails gracefully with upstream hint', sr.status === 502 && /terms|error/i.test(sj.error || ''), sj.error);
+        check('legacy voice speech fails gracefully (never a voice/format rejection)', sr.status === 502 && /terms|error/i.test(sj.error || '') && !/voice must be one of/i.test(sj.error || '') && !/response_format/i.test(sj.error || ''), sj.error);
+    }
+    const sr2r = await fetch(`${B}/api/ai/speech`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hello', voice: 'diana' }) });
+    if (sr2r.status === 200) {
+        const ab2 = Buffer.from(await sr2r.arrayBuffer());
+        check('current-catalog voice returns audio (wav)', ab2.length > 500 && (sr2r.headers.get('content-type') || '').includes('audio'));
+    } else {
+        const sj2 = await sr2r.json();
+        check('current-catalog voice fails gracefully (never a voice/format rejection)', sr2r.status === 502 && !/voice must be one of/i.test(sj2.error || '') && !/response_format/i.test(sj2.error || ''), sj2.error);
     }
     rs = await j(`${B}/api/ai/speech`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: '' }) });
     check('speech rejects empty text', rs.status === 400);

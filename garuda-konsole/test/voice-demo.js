@@ -2,7 +2,7 @@
      test/out/voice-sample.mp3     (input fixture copy — the spoken test phrase)
      test/out/transcription.txt    (what YOUR Groq Whisper heard)
      test/out/transcription.json   (raw API response)
-     test/out/tts-sample.mp3       (Orpheus TTS output — only if terms accepted)
+     test/out/tts-sample.wav       (Orpheus TTS output — only if terms accepted)
      test/out/tts-status.txt       (what happened with TTS either way)
    Usage: node test/voice-demo.js
 */
@@ -62,8 +62,8 @@ async function waitForServer() {
             exitCode = 1;
         }
 
-        /* 2) Text-to-speech: try to render an mp3 through /api/ai/speech */
-        console.log('\n2) TTS: rendering an MP3 via /api/ai/speech …');
+        /* 2) Text-to-speech: render audio through /api/ai/speech (WAV — upstream retired MP3) */
+        console.log('\n2) TTS: rendering audio via /api/ai/speech …');
         const sr = await fetch(`${B}/api/ai/speech`, {
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, H),
@@ -71,9 +71,9 @@ async function waitForServer() {
         });
         if (sr.status === 200) {
             const buf = Buffer.from(await sr.arrayBuffer());
-            fs.writeFileSync(path.join(OUT, 'tts-sample.mp3'), buf);
-            fs.writeFileSync(path.join(OUT, 'tts-status.txt'), `OK — wrote tts-sample.mp3 (${buf.length} bytes)\n`);
-            console.log(`   ✔ MP3 written: test/out/tts-sample.mp3 (${buf.length} bytes) — play it!`);
+            fs.writeFileSync(path.join(OUT, 'tts-sample.wav'), buf);
+            fs.writeFileSync(path.join(OUT, 'tts-status.txt'), `OK — wrote tts-sample.wav (${buf.length} bytes)\n`);
+            console.log(`   ✔ Audio written: test/out/tts-sample.wav (${buf.length} bytes) — play it!`);
         } else {
             const sj = await sr.json().catch(() => null);
             const msg = `HTTP ${sr.status}: ${JSON.stringify(sj)}`;

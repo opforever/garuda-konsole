@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.1.2';
+const APP_VERSION = '5.1.3';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -46,7 +46,7 @@ const DEFAULT_SETTINGS = {
     ringSecs: 60,
     floatBall: null,
     aiVoice: false,
-    aiVoiceName: 'tara'
+    aiVoiceName: 'autumn'
 };
 
 const BUILTIN_THEMES = {
@@ -698,7 +698,7 @@ async function speakText(text, opts) {
         const res = await fetch('/api/ai/speech', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-            body: JSON.stringify({ text: clean, voice: (opts && opts.voice) || getSettings().aiVoiceName || 'tara' })
+            body: JSON.stringify({ text: clean, voice: (opts && opts.voice) || getSettings().aiVoiceName || 'autumn' })
         });
         if (!res.ok) {
             const j = await res.json().catch(() => null);
@@ -739,33 +739,40 @@ function speakLastOutput() {
     return speakText(text.slice(0, 900));
 }
 
-/* Download any text as a spoken MP3 file (Orpheus TTS) — returns true on save */
+/* Download any text as a spoken audio file (Orpheus TTS) — returns true on save.
+   Historical name: Groq retired MP3 output for Orpheus, so the server now serves
+   WAV; the saved file's extension follows the actual response content-type. */
 async function downloadTextAsMp3(text, nameHint) {
     if (!text || !text.trim()) return false;
-    showToast({ type: 'info', title: 'Rendering MP3…', duration: 1500 });
+    showToast({ type: 'info', title: 'Rendering voice…', duration: 1500 });
     try {
         const res = await fetch('/api/ai/speech', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-            body: JSON.stringify({ text: String(text).slice(0, 5000), voice: getSettings().aiVoiceName || 'tara' })
+            body: JSON.stringify({ text: String(text).slice(0, 5000), voice: getSettings().aiVoiceName || 'autumn' })
         });
         if (!res.ok) {
             const j = await res.json().catch(() => null);
-            showToast({ type: 'warn', title: 'MP3 failed', text: ((j && j.error) || ('HTTP ' + res.status)).slice(0, 160), duration: 6000 });
+            showToast({ type: 'warn', title: 'Voice render failed', text: ((j && j.error) || ('HTTP ' + res.status)).slice(0, 160), duration: 6000 });
             return false;
         }
+        let ext = 'wav';
+        try {
+            const ct = String((res.headers && res.headers.get && res.headers.get('content-type')) || '');
+            if (ct.includes('mpeg')) ext = 'mp3';
+        } catch (e) {}
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'garuda-voice-' + (nameHint || Date.now()) + '.mp3';
+        a.download = 'garuda-voice-' + (nameHint || Date.now()) + '.' + ext;
         document.body.appendChild(a);
         a.click();
         setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
-        showToast({ type: 'success', title: 'MP3 saved to Downloads' });
+        showToast({ type: 'success', title: `Voice saved to Downloads (.${ext})` });
         return true;
     } catch (e) {
-        showToast({ type: 'error', title: 'MP3 failed', text: 'Network error while rendering voice.' });
+        showToast({ type: 'error', title: 'Voice render failed', text: 'Network error while rendering voice.' });
         return false;
     }
 }

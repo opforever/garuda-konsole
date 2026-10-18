@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.1.2';
+const VERSION = '5.1.3';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -1165,7 +1165,11 @@ const AI_MODEL_CATALOG = [
     { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B (balanced)', kind: 'chat' }
 ];
 const TTS_MODEL = 'canopylabs/orpheus-v1-english';
-const TTS_VOICES = ['tara', 'leah', 'jordan', 'kyle', 'carlos', 'annie', 'matthew', 'nicole'];
+/* Orpheus voice catalog — must match what Groq currently accepts. The original
+   eight voices (tara/leah/jordan/kyle/carlos/annie/matthew/nicole) were retired
+   upstream; the /api/ai/speech handler additionally retries with the default
+   voice if upstream ever rejects one again, so a catalog churn can't hard-fail TTS. */
+const TTS_VOICES = ['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'];
 const STT_MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'];
 
 app.get('/api/ai/models', requireAuth, (req, res) => {
@@ -1184,20 +1188,39 @@ app.post('/api/ai/speech', requireAuth, async (req, res) => {
     const voice = TTS_VOICES.includes(req.body.voice) ? req.body.voice : TTS_VOICES[0];
     const { key } = getGroqKey();
     if (!key) return res.status(400).json({ error: 'No Groq API key configured' });
+    const doTts = (v) => fetch('https://api.groq.com/openai/v1/audio/speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        /* Upstream retired MP3 output for Orpheus ("response_format must be one
+           of [wav]") — WAV is the format the API accepts now. */
+        body: JSON.stringify({ model: TTS_MODEL, voice: v, input: text, response_format: 'wav' }),
+        signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined
+    });
     try {
-        const up = await fetch('https://api.groq.com/openai/v1/audio/speech', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-            body: JSON.stringify({ model: TTS_MODEL, voice, input: text, response_format: 'mp3' }),
-            signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined
-        });
+        let up = await doTts(voice);
+        let lastMsg = '';
         if (!up.ok) {
             const j = await up.json().catch(() => null);
-            log(`TTS upstream ${up.status}: ${JSON.stringify(j).slice(0, 200)}`);
-            return res.status(502).json({ error: (j && j.error && (j.error.message || j.error)) || `Groq TTS error ${up.status}` });
+            lastMsg = (j && j.error && (j.error.message || j.error)) || `Groq TTS error ${up.status}`;
+            /* Upstream has churned the Orpheus voice catalog before (the original
+               eight voices were retired without notice, breaking every TTS/MP3
+               request). If the voice itself is what got rejected, retry once
+               with our current default instead of failing the request. */
+            if (up.status === 400 && /voice/i.test(String(lastMsg)) && voice !== TTS_VOICES[0]) {
+                log(`TTS voice "${voice}" rejected upstream — retrying with "${TTS_VOICES[0]}"`);
+                up = await doTts(TTS_VOICES[0]);
+                if (!up.ok) {
+                    const j2 = await up.json().catch(() => null);
+                    lastMsg = (j2 && j2.error && (j2.error.message || j2.error)) || `Groq TTS error ${up.status}`;
+                }
+            }
+        }
+        if (!up.ok) {
+            log(`TTS upstream ${up.status}: ${String(lastMsg).slice(0, 200)}`);
+            return res.status(502).json({ error: lastMsg || `Groq TTS error ${up.status}` });
         }
         const buf = Buffer.from(await up.arrayBuffer());
-        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Content-Type', 'audio/wav');
         res.setHeader('Cache-Control', 'no-store');
         res.send(buf);
     } catch (e) {
