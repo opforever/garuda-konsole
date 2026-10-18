@@ -1,0 +1,17 @@
+{
+  "schedules": [],
+  "vapid": {
+    "publicKey": "BPegFpZ5Xi30q5U3YrUjAXOWkAcGINUWDPHOkay2kDD-DSisqgpfDjgPFTjrR9npnIRDazv4JcLyXznzFD6b9TY",
+    "privateKey": "--HCqC3AmPK7U22oCw3we38jmWxXiOo9lN5nbOVHE1o"
+  },
+  "pushSubscriptions": [],
+  "pushTriggers": [
+    {
+      "id": "t1",
+      "name": "err",
+      "pattern": "error",
+      "caseSensitive": false,
+      "push": true
+    }
+  ]
+}

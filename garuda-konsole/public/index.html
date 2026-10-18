@@ -1,0 +1,1371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <!-- interactive-widget=resizes-content prevents the mobile keyboard from covering the prompt -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content, viewport-fit=cover" />
+    <title>Garuda Konsole — Command Center</title>
+    <meta name="description" content="A beautiful web-based interactive terminal with persistent sessions, live sharing, file management and system monitoring." />
+    <meta name="theme-color" content="#0c0e12" />
+    <meta property="og:title" content="Garuda Konsole" />
+    <meta property="og:description" content="Persistent web terminal with live pair programming, file manager and system monitor." />
+    <meta property="og:type" content="website" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+    <link rel="apple-touch-icon" href="icons/icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ══════════════ SVG Icon Sprite ══════════════ -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <defs>
+        <g id="icn-base" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></g>
+    </defs>
+    <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="M6.5 9.5l3 2.5-3 2.5"/><path d="M12.5 15h5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.4"/><path d="M3 19.5c.9-3.2 3.1-4.9 6-4.9s5.1 1.7 6 4.9"/><circle cx="17.2" cy="9" r="2.4"/><path d="M15.8 14.9c2.3.3 3.9 1.8 4.5 4.3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"/><path d="M15.8 15.8L21 21"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17.5 7H20M4 17h3.5M12 17h8"/><circle cx="15" cy="7" r="2.2"/><circle cx="9.5" cy="17" r="2.2"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.6a2.7 2.7 0 1 1 3.4 2.6c-.6.2-.9.8-.9 1.4v.5"/><circle cx="12" cy="17.4" r=".4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16.5V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4 15.5V19a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-3.5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12.5M7.5 12L12 16.5 16.5 12"/><path d="M4 15.5V19a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-3.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2c.5 0 .9.2 1.2.6L11.5 8.5h8A1.5 1.5 0 0 1 21 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2c.5 0 .9.2 1.2.6L11.5 8.5h8A1.5 1.5 0 0 1 21 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 11.8v4.4M9.8 14h4.4"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.8h7.2L19 9.4V20a1.2 1.2 0 0 1-1.2 1.2H6.2A1.2 1.2 0 0 1 5 20V5a1.2 1.2 0 0 1 1-1.2z"/><path d="M13 3.8V9.5h5.6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.8h15M9.5 6.8V4.9c0-.8.6-1.4 1.4-1.4h2.2c.8 0 1.4.6 1.4 1.4v1.9"/><path d="M6.6 6.8l.9 12.6c.05.9.8 1.6 1.7 1.6h5.6c.9 0 1.65-.7 1.7-1.6l.9-12.6"/><path d="M10 10.5v7M14 10.5v7"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20.2l1.1-4.1L16.6 4.6a2.15 2.15 0 0 1 3 3L8.2 19.1z"/><path d="M14.8 6.4l3 3"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.6"/><rect x="3.4" y="3.4" width="17.2" height="17.2" rx="3"/><path d="M9 1.2v2.2M15 1.2v2.2M9 20.6v2.2M15 20.6v2.2M1.2 9h2.2M1.2 15h2.2M20.6 9h2.2M20.6 15h2.2"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5h4l3-8.5 5 16.5 2.6-8h4.4"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.2 13.8a4.6 4.6 0 0 0 6.9.4l2.4-2.5a4.6 4.6 0 0 0-6.5-6.5l-1.4 1.4"/><path d="M13.8 10.2a4.6 4.6 0 0 0-6.9-.4l-2.4 2.5a4.6 4.6 0 0 0 6.5 6.5l1.4-1.4"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.8" y="8.8" width="11.7" height="11.7" rx="2"/><path d="M5.6 15.2H5a1.5 1.5 0 0 1-1.5-1.5v-8.2A1.5 1.5 0 0 1 5 4h8.2a1.5 1.5 0 0 1 1.5 1.5v.6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l5 5 10-11"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6L22 20.4H2z"/><path d="M12 10v4.2"/><circle cx="12" cy="17.4" r=".4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 10.8v5.4"/><circle cx="12" cy="7.9" r=".4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 9.5a5.8 5.8 0 1 1 11.6 0c0 4.8 1.9 5.9 1.9 5.9H4.3s1.9-1.1 1.9-5.9z"/><path d="M10 19.4a2.3 2.3 0 0 0 4 0"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.6" y="10.2" width="14.8" height="10.3" rx="2.2"/><path d="M8.2 10.2V7.1a3.8 3.8 0 0 1 7.6 0v3.1"/><circle cx="12" cy="15.3" r="1.3" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.6" y="10.2" width="14.8" height="10.3" rx="2.2"/><path d="M8.2 10.2V7.1a3.8 3.8 0 0 1 7.4-1"/><circle cx="12" cy="15.3" r="1.3" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 12S6 5.6 12 5.6 21.8 12 21.8 12 18 18.4 12 18.4 2.2 12 2.2 12z"/><circle cx="12" cy="12" r="3.1"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.6 6.1A8.8 8.8 0 0 1 12 5.8c6 0 9.8 6.2 9.8 6.2a17 17 0 0 1-3.3 4M6 7.9A16.7 16.7 0 0 0 2.2 12S6 18.2 12 18.2a9.4 9.4 0 0 0 4.3-1"/><path d="M10 10a2.8 2.8 0 0 0 4 4"/><path d="M3.5 3.5l17 17"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.8 3.8v4.7h-4.7"/></symbol>
+    <symbol id="i-chev-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5L7.5 12l7 7"/></symbol>
+    <symbol id="i-chev-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 5l7 7-7 7"/></symbol>
+    <symbol id="i-chev-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 14.5l7-7 7 7"/></symbol>
+    <symbol id="i-chev-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9.5l7 7 7-7"/></symbol>
+    <symbol id="i-chevs-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12.5l6-6 6 6M6 18.5l6-6 6 6"/></symbol>
+    <symbol id="i-maximize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5V4h5.5M20 9.5V4h-5.5M4 14.5V20h5.5M20 14.5V20h-5.5"/></symbol>
+    <symbol id="i-minimize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 4v5.5H4M14.5 4v5.5H20M9.5 20v-5.5H4M14.5 20v-5.5H20"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 2.5L4.8 13.8h6.1L10.2 21.5l8.9-11.8h-6.6z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6.8V12l3.4 2"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.7 5.7 6.3.8-4.6 4.3 1.2 6.2L12 17l-5.6 3 1.2-6.2L3 9.5l6.3-.8z"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2a8.8 8.8 0 1 0 0 17.6c1.3 0 2-.9 2-1.9 0-1.4-1.3-1.7-1.3-2.9 0-.9.7-1.6 1.7-1.6h1.4a5 5 0 0 0 5-5c0-3.7-3.9-6.2-8.8-6.2z"/><circle cx="8.1" cy="10.2" r=".7" fill="currentColor" stroke="none"/><circle cx="12" cy="7.6" r=".7" fill="currentColor" stroke="none"/><circle cx="15.9" cy="10.2" r=".7" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5.5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.5" cy="12" r="1.7"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 11.2L12 3.8l8.5 7.4V19a1.6 1.6 0 0 1-1.6 1.6h-4.2v-6h-5.4v6H5.1A1.6 1.6 0 0 1 3.5 19z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 4.8l11.5 7.2-11.5 7.2z"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v9"/><path d="M6.2 6.4a8.2 8.2 0 1 0 11.6 0"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="4" width="18.8" height="12.6" rx="2"/><path d="M8.6 20.6h6.8M12 16.6v4"/></symbol>
+    <symbol id="i-drive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 13.4L7.2 5h9.6l2.6 8.4V19a1.5 1.5 0 0 1-1.5 1.5H6.1A1.5 1.5 0 0 1 4.6 19z"/><path d="M4.2 13.4h15.6"/><circle cx="7.9" cy="16.9" r=".55" fill="currentColor" stroke="none"/><circle cx="10.6" cy="16.9" r=".55" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 2.6L2.8 10.3l7.7 3.4 3.4 7.7z"/><path d="M21.4 2.6L10.5 13.7"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.6h11L20.4 8v11.4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4.6a1 1 0 0 1 1-1z"/><path d="M7.8 3.6v5.8h7.2V3.6"/><rect x="7.8" y="13.4" width="8.4" height="7"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.4" y="6" width="19.2" height="12" rx="2"/><path d="M6 9.4h.01M9.4 9.4h.01M12.8 9.4h.01M16.2 9.4h.01M6 12.6h.01M9.4 12.6h.01M12.8 12.6h.01M16.2 12.6h.01M8 15.6h8"/></symbol>
+    <symbol id="i-ext-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3.8h6.2V10M20.2 3.8L11.4 12.6"/><path d="M18 14.4V19a1.6 1.6 0 0 1-1.6 1.6H5A1.6 1.6 0 0 1 3.4 19V7.6A1.6 1.6 0 0 1 5 6h4.6"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V4.8M5.5 11L12 4.5l6.5 6.5"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15.2M5.5 13l6.5 6.5 6.5-6.5"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H4.8M11 5.5L4.5 12l6.5 6.5"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15.2M13 5.5l6.5 6.5-6.5 6.5"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 6.5L3 12l5.5 5.5M15.5 6.5L21 12l-5.5 5.5M13.6 4l-3.2 16"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.4"/><path d="M4.8 9v9.6A1.5 1.5 0 0 0 6.3 20h11.4a1.5 1.5 0 0 0 1.5-1.4V9M10 13h4"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="4.6" width="17.6" height="14.8" rx="2"/><circle cx="8.6" cy="9.8" r="1.6"/><path d="M3.6 17l5-4.6 4 3.4 3.4-3 4.4 4"/></symbol>
+    <symbol id="i-corner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 5v4.5a2 2 0 0 1-2 2H5.5"/><path d="M9 8L5.4 11.6 9 15.2"/></symbol>
+    <symbol id="i-split" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="2.2"/><path d="M12 4.5v15"/></symbol>
+    <symbol id="i-record" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.8c0 4-3.8 7.2-8.5 7.2-.9 0-1.8-.1-2.6-.3L4.2 20.6l1.6-3.5c-1.4-1.3-2.3-3-2.3-5.3 0-4 3.8-7.2 8.5-7.2s8.5 3.2 8.5 7z"/><path d="M8.6 11.6h6.8M8.6 14.4h4.4"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8.5 6H21M8.5 12H21M8.5 18H21"/><circle cx="4" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 3.5h5.6l-.9 5.6 3.3 3.4H6.8l3.3-3.4z"/><path d="M12 12.5v8"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8.4 8.4 0 0 1 9.8 4 8.5 8.5 0 1 0 20 14.2z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.8l2.1 5.7 5.7 2.1-5.7 2.1L12 18.4l-2.1-5.7L4.2 10.6l5.7-2.1z"/><path d="M19.2 15.5l.8 2.1 2.1.8-2.1.8-.8 2.1-.8-2.1-2.1-.8 2.1-.8z"/><path d="M4.8 2.5l.6 1.6 1.6.6-1.6.6L4.8 6.9l-.6-1.6L2.6 4.7l1.6-.6z"/></symbol>
+    <symbol id="i-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.6c2.7 1.8 4.1 4.7 4.1 8.1v3.9l2.5 2.5v2.5l-3.9-1.6H9.3l-3.9 1.6v-2.5l2.5-2.5v-3.9c0-3.4 1.4-6.3 4.1-8.1z"/><circle cx="12" cy="9.7" r="1.9"/><path d="M10.3 20c.3 1.5 1.7 2.6 1.7 2.6s1.4-1.1 1.7-2.6"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7.2" height="7.2" rx="1.6"/><rect x="13.3" y="3.5" width="7.2" height="7.2" rx="1.6"/><rect x="3.5" y="13.3" width="7.2" height="7.2" rx="1.6"/><rect x="13.3" y="13.3" width="7.2" height="7.2" rx="1.6"/></symbol>
+    <symbol id="i-minus-line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12h16"/></symbol>
+    <symbol id="i-checksq" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8 12.2l2.8 2.8L16.5 9"/></symbol>
+    <symbol id="i-robot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="8" width="15" height="11" rx="2.6"/><path d="M12 3.2v4.6"/><circle cx="12" cy="2.9" r="1.2" fill="currentColor" stroke="none"/><circle cx="9" cy="12.8" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="12.8" r="1.1" fill="currentColor" stroke="none"/><path d="M9.5 16.2h5"/><path d="M2.4 11.5v3.5M21.6 11.5v3.5"/></symbol>
+</svg>
+
+<!-- Animated background canvas (lockscreen ambience) -->
+<canvas id="aurora-canvas" aria-hidden="true"></canvas>
+
+<!-- ══════════════ Lockscreen ══════════════ -->
+<div id="lockscreen" class="lockscreen">
+    <div class="lock-orbs" aria-hidden="true">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+    <div class="lock-box">
+        <div class="logo-wrapper">
+            <svg class="garuda-logo-svg" viewBox="0 0 100 100" width="84" height="84" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <defs>
+                    <linearGradient id="garudaGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#00f2fe" />
+                        <stop offset="50%" stop-color="#3daee9" />
+                        <stop offset="100%" stop-color="#9b59b6" />
+                    </linearGradient>
+                    <linearGradient id="garudaGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stop-color="#ff007f" />
+                        <stop offset="50%" stop-color="#f67400" />
+                        <stop offset="100%" stop-color="#00f2fe" />
+                    </linearGradient>
+                    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="3" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                </defs>
+                <path d="M50 8 L62 26 L78 18 L70 36 L92 34 L78 50 L94 58 L76 66 L86 82 L64 74 L50 94 L36 74 L14 82 L24 66 L6 58 L22 50 L8 34 L30 36 L22 18 L38 26 Z" fill="url(#garudaGrad1)" opacity="0.35" />
+                <path d="M50 14 L59 28 L72 22 L65 37 L82 36 L70 48 L84 55 L70 61 L77 73 L60 67 L50 82 L40 67 L23 73 L30 61 L16 55 L30 48 L18 36 L35 37 L28 22 L41 28 Z" fill="url(#garudaGrad1)" />
+                <path d="M50 22 L56 32 L66 28 L60 38 L72 38 L63 46 L73 52 L62 56 L67 65 L55 61 L50 72 L45 61 L33 65 L38 56 L27 52 L37 46 L28 38 L40 38 L34 28 L44 32 Z" fill="url(#garudaGrad2)" />
+                <path d="M50 30 L54 38 L60 42 L53 45 L50 56 L47 45 L40 42 L46 38 Z" fill="#ffffff" filter="url(#neonGlow)" />
+            </svg>
+        </div>
+        <h1 class="neon-title">Garuda Konsole</h1>
+        <div class="lock-version-chip">v4.1 · COMMAND CENTER</div>
+        <div class="secure-badge"><span class="badge-dot"></span> SECURE SHELL ACCESS</div>
+        <div id="lock-error" class="lock-error hidden">
+            <svg class="ic ic-sm"><use href="#i-alert"></use></svg>
+            <span id="lock-error-text">Incorrect password</span>
+        </div>
+        <div class="lock-input-row">
+            <svg class="ic ic-lock-input"><use href="#i-lock"></use></svg>
+            <input type="password" id="password-input" placeholder="Enter password" autocomplete="current-password" autofocus />
+            <button type="button" id="toggle-password-btn" class="icon-only" data-action="toggle-password" aria-label="Show password">
+                <svg class="ic"><use href="#i-eye"></use></svg>
+            </button>
+        </div>
+        <button type="button" id="login-btn" class="btn-unlock" data-action="login">
+            <span class="btn-label">Unlock Terminal</span>
+            <span class="btn-spinner hidden" id="login-spinner"></span>
+        </button>
+        <div class="lock-hint">Press <kbd>Enter</kbd> to unlock</div>
+    </div>
+</div>
+
+<!-- ══════════════ Boot Sequence Overlay ══════════════ -->
+<div id="boot-overlay" class="boot-overlay hidden">
+    <div class="boot-inner">
+        <pre id="boot-lines" class="boot-lines"></pre>
+        <div class="boot-progress"><div class="boot-bar" id="boot-bar"></div></div>
+    </div>
+    <div class="boot-skip">tap anywhere or press any key to skip</div>
+</div>
+
+<!-- ══════════════ Main App ══════════════ -->
+<div class="konsole-container hidden" id="app">
+
+    <!-- Viewer / Spectator Top Bar -->
+    <div id="viewer-topbar" class="viewer-topbar hidden">
+        <div class="viewer-meta">
+            <span class="live-dot"></span>
+            <span class="viewer-title">LIVE · <span id="viewer-tab-title">session</span></span>
+            <span id="viewer-mode-badge" class="viewer-mode-badge">Read-Only Spectator</span>
+        </div>
+        <div class="viewer-controls">
+            <span class="viewer-count-chip"><svg class="ic ic-sm"><use href="#i-users"></use></svg><span id="viewer-connected-count">1</span></span>
+            <button class="icon-btn" data-action="chat-toggle" title="Session chat"><svg class="ic"><use href="#i-chat"></use></svg><span class="btn-badge hidden" id="viewer-chat-badge">0</span></button>
+            <select id="viewer-theme-select" class="theme-select-sm" title="Theme"></select>
+            <button class="icon-btn" data-action="font-up" title="Zoom in"><svg class="ic"><use href="#i-plus"></use></svg></button>
+            <button class="icon-btn icon-btn-text" data-action="font-down" title="Zoom out">A−</button>
+            <button class="icon-btn" data-action="fullscreen" title="Fullscreen"><svg class="ic"><use href="#i-maximize"></use></svg></button>
+        </div>
+    </div>
+
+    <!-- Desktop Toolbar -->
+    <header class="toolbar" id="main-toolbar">
+        <div class="brand" title="Garuda Konsole">
+            <svg class="brand-logo" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+                <path d="M50 14 L59 28 L72 22 L65 37 L82 36 L70 48 L84 55 L70 61 L77 73 L60 67 L50 82 L40 67 L23 73 L30 61 L16 55 L30 48 L18 36 L35 37 L28 22 L41 28 Z" fill="url(#garudaGrad1)" />
+                <path d="M50 26 L55 35 L64 32 L59 41 L69 41 L61 47 L69 52 L60 55 L64 63 L53 59 L50 68 L47 59 L36 63 L40 55 L31 52 L39 47 L31 41 L41 41 L36 32 L45 35 Z" fill="url(#garudaGrad2)" />
+            </svg>
+            <div class="brand-text">
+                <span class="brand-name">Garuda</span>
+                <span class="brand-sub" id="brand-shell">konsole</span>
+            </div>
+        </div>
+        <div class="tab-bar" id="tab-bar">
+            <button class="new-tab-btn" id="new-tab-btn" data-action="new-tab" title="New tab (Alt+T)">
+                <svg class="ic"><use href="#i-plus"></use></svg>
+            </button>
+        </div>
+        <div class="toolbar-actions desktop-only" id="toolbar-actions">
+            <button class="icon-btn" data-action="palette" title="Command palette (Ctrl+Shift+P)"><svg class="ic"><use href="#i-zap"></use></svg></button>
+            <button class="icon-btn" id="ai-btn" data-action="ai-toggle" title="AI Guide"><svg class="ic"><use href="#i-sparkle"></use></svg><span class="ai-thinking-dot hidden" id="ai-btn-dot"></span></button>
+            <button class="icon-btn" data-action="share" title="Live share"><svg class="ic"><use href="#i-users"></use></svg></button>
+            <button class="icon-btn" data-action="files" title="File manager"><svg class="ic"><use href="#i-folder"></use></svg></button>
+            <button class="icon-btn" data-action="stats" title="System monitor"><svg class="ic"><use href="#i-activity"></use></svg></button>
+            <span class="tb-divider"></span>
+            <button class="icon-btn" id="split-btn" data-action="split-cycle" title="Split view (Alt+S)"><svg class="ic"><use href="#i-split"></use></svg></button>
+            <button class="icon-btn" id="record-btn" data-action="record-toggle" title="Record active tab output"><svg class="ic"><use href="#i-record"></use></svg></button>
+            <button class="icon-btn" id="chat-btn" data-action="chat-toggle" title="Session chat"><svg class="ic"><use href="#i-chat"></use></svg><span class="btn-badge hidden" id="chat-btn-badge">0</span></button>
+            <button class="icon-btn" id="activity-btn" data-action="activity-toggle" title="Activity center"><svg class="ic"><use href="#i-list"></use></svg><span class="btn-badge hidden" id="activity-btn-badge">0</span></button>
+            <button class="icon-btn" data-action="triggers" title="Output triggers &amp; alerts"><svg class="ic"><use href="#i-bell"></use></svg></button>
+            <button class="icon-btn" id="tasks-btn" data-action="tasks-toggle" title="Background tasks &amp; scheduler"><svg class="ic"><use href="#i-rocket"></use></svg><span class="btn-badge hidden" id="tasks-badge">0</span></button>
+            <span class="tb-divider"></span>
+            <button class="icon-btn" data-action="clear" title="Clear screen (Ctrl+L)"><svg class="ic"><use href="#i-refresh"></use></svg></button>
+            <button class="icon-btn icon-btn-text" data-action="font-down" title="Decrease font">A−</button>
+            <button class="icon-btn icon-btn-text" data-action="font-up" title="Increase font">A+</button>
+            <button class="icon-btn" data-action="fullscreen" title="Fullscreen"><svg class="ic"><use href="#i-maximize"></use></svg></button>
+            <span class="tb-divider"></span>
+            <button class="icon-btn" id="alt-lock-btn" data-action="altlock" title="Alt Lock: select a filename to download it"><svg class="ic"><use href="#i-download"></use></svg></button>
+            <button class="icon-btn" data-action="upload" title="Upload file to current folder"><svg class="ic"><use href="#i-upload"></use></svg></button>
+            <button class="icon-btn" data-action="macros" title="Macros"><svg class="ic"><use href="#i-play"></use></svg></button>
+            <button class="icon-btn" data-action="settings" title="Settings (Ctrl+,)"><svg class="ic"><use href="#i-sliders"></use></svg></button>
+            <button class="icon-btn" data-action="help" title="Help"><svg class="ic"><use href="#i-help"></use></svg></button>
+            <button class="icon-btn" data-action="lock" title="Lock session"><svg class="ic"><use href="#i-lock"></use></svg></button>
+        </div>
+        <div class="toolbar-actions mobile-only">
+            <button class="icon-btn" data-action="ai-toggle" title="AI Guide"><svg class="ic"><use href="#i-sparkle"></use></svg><span class="ai-thinking-dot hidden" id="ai-btn-dot-m"></span></button>
+            <button class="icon-btn" data-action="palette" title="Command palette"><svg class="ic"><use href="#i-zap"></use></svg></button>
+            <button class="icon-btn" data-action="files" title="Files"><svg class="ic"><use href="#i-folder"></use></svg></button>
+            <button class="icon-btn" data-action="mobile-more" title="More actions"><svg class="ic"><use href="#i-more"></use></svg></button>
+        </div>
+    </header>
+
+    <!-- Pinned macros quick bar -->
+    <div id="pin-bar" class="pin-bar hidden"></div>
+
+    <input type="file" id="file-upload" multiple style="display:none" />
+    <input type="file" id="theme-import-input" accept=".json,application/json" style="display:none" />
+
+    <!-- App body -->
+    <div class="app-body" id="app-body">
+        <div class="terminals-wrapper" id="terminals-wrapper"></div>
+
+        <!-- Search Bar -->
+        <div class="search-bar" id="search-bar">
+            <svg class="ic ic-sm search-ic"><use href="#i-search"></use></svg>
+            <input type="text" id="search-input" placeholder="Find in terminal…" autocomplete="off" />
+            <span class="search-count" id="search-count"></span>
+            <button class="sb-btn" id="search-case-btn" data-action="search-case" title="Match case">Aa</button>
+            <button class="sb-btn" id="search-regex-btn" data-action="search-regex" title="Regular expression">.*</button>
+            <button class="sb-btn" data-action="search-prev" title="Previous (Shift+Enter)"><svg class="ic ic-sm"><use href="#i-chev-up"></use></svg></button>
+            <button class="sb-btn" data-action="search-next" title="Next (Enter)"><svg class="ic ic-sm"><use href="#i-chev-down"></use></svg></button>
+            <button class="sb-btn" data-action="search-close" title="Close (Esc)"><svg class="ic ic-sm"><use href="#i-x"></use></svg></button>
+        </div>
+
+        <!-- Stats Drawer -->
+        <aside id="stats-drawer" class="drawer hidden" aria-label="System monitor">
+            <div class="drawer-header">
+                <h3><svg class="ic"><use href="#i-activity"></use></svg> System Monitor</h3>
+                <button class="icon-btn" data-action="stats-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+            </div>
+            <div class="drawer-body">
+                <div class="stat-hero">
+                    <div class="stat-hero-num"><span id="stat-cpu-pct">0</span><small>%</small></div>
+                    <div class="stat-hero-meta">
+                        <span>CPU load</span>
+                        <span id="stat-cpu-cores">— cores</span>
+                    </div>
+                    <canvas id="cpu-spark" class="cpu-spark" width="520" height="90"></canvas>
+                </div>
+                <div class="stat-block">
+                    <div class="stat-row-head"><span>Memory</span><span id="stat-mem-text">—</span></div>
+                    <div class="meter"><div class="meter-fill meter-mem" id="stat-mem-bar" style="width:0%"></div></div>
+                </div>
+                <div class="stat-block" id="stat-disk-block">
+                    <div class="stat-row-head"><span>Disk</span><span id="stat-disk-text">—</span></div>
+                    <div class="meter"><div class="meter-fill meter-disk" id="stat-disk-bar" style="width:0%"></div></div>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card"><span class="stat-label">Load avg</span><span class="stat-value" id="stat-load">—</span></div>
+                    <div class="stat-card"><span class="stat-label">Uptime</span><span class="stat-value" id="stat-uptime">—</span></div>
+                    <div class="stat-card"><span class="stat-label">Sessions</span><span class="stat-value" id="stat-sessions">—</span></div>
+                    <div class="stat-card"><span class="stat-label">Viewers</span><span class="stat-value" id="stat-viewers">—</span></div>
+                </div>
+                <div class="stat-host">
+                    <div class="stat-host-row"><svg class="ic ic-sm"><use href="#i-monitor"></use></svg><span id="stat-hostname">—</span></div>
+                    <div class="stat-host-row"><svg class="ic ic-sm"><use href="#i-cpu"></use></svg><span id="stat-cpu-model" class="ellipsis">—</span></div>
+                    <div class="stat-host-row"><svg class="ic ic-sm"><use href="#i-code"></use></svg><span id="stat-platform">—</span></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Files Drawer -->
+        <aside id="files-drawer" class="drawer hidden" aria-label="File manager">
+            <div class="drawer-header">
+                <h3><svg class="ic"><use href="#i-folder"></use></svg> Files</h3>
+                <div class="drawer-header-actions">
+                    <button class="icon-btn" data-action="files-up" title="Parent folder"><svg class="ic"><use href="#i-chev-up"></use></svg></button>
+                    <button class="icon-btn" data-action="files-home" title="Home folder"><svg class="ic"><use href="#i-home"></use></svg></button>
+                    <button class="icon-btn" data-action="files-cwd" title="Jump to shell's current folder"><svg class="ic"><use href="#i-corner"></use></svg></button>
+                    <button class="icon-btn" data-action="files-refresh" title="Refresh"><svg class="ic"><use href="#i-refresh"></use></svg></button>
+                    <button class="icon-btn" data-action="files-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+                </div>
+            </div>
+            <div class="drawer-body files-body">
+                <div class="files-crumbs" id="files-crumbs"></div>
+                <div class="files-toolbar">
+                    <button class="btn-mini" data-action="files-mkdir"><svg class="ic ic-sm"><use href="#i-folder-plus"></use></svg> New folder</button>
+                    <button class="btn-mini" data-action="files-upload"><svg class="ic ic-sm"><use href="#i-upload"></use></svg> Upload</button>
+                    <button class="btn-mini" data-action="files-view" id="files-view-btn" title="Toggle grid / list"><svg class="ic ic-sm"><use href="#i-grid"></use></svg> Grid</button>
+                    <button class="btn-mini" data-action="files-select-mode" id="files-select-btn" title="Multi-select"><svg class="ic ic-sm"><use href="#i-checksq"></use></svg> Select</button>
+                    <select id="files-sort" class="select-mini" title="Sort">
+                        <option value="name">Name</option>
+                        <option value="size">Size</option>
+                        <option value="mtime">Modified</option>
+                        <option value="type">Type</option>
+                    </select>
+                </div>
+                <div class="files-selbar hidden" id="files-selbar">
+                    <span class="sel-count" id="files-sel-count">0 selected</span>
+                    <button class="btn-mini" data-action="files-sel-download"><svg class="ic ic-sm"><use href="#i-download"></use></svg> Download</button>
+                    <button class="btn-mini" data-action="files-sel-delete" style="color:var(--danger)"><svg class="ic ic-sm"><use href="#i-trash"></use></svg> Delete</button>
+                    <button class="btn-mini" data-action="files-sel-clear">Clear</button>
+                </div>
+                <div class="files-search-row">
+                    <svg class="ic ic-sm"><use href="#i-search"></use></svg>
+                    <input type="text" id="files-search-input" placeholder="Search under this folder (Enter)…" autocomplete="off" />
+                    <button class="icon-btn hidden" id="files-search-clear" data-action="files-search-clear" title="Back to browsing"><svg class="ic ic-sm"><use href="#i-x"></use></svg></button>
+                </div>
+                <div class="files-dropzone" id="files-dropzone">
+                    <div class="files-list" id="files-list"></div>
+                    <div class="files-drop-hint hidden" id="files-drop-hint">
+                        <svg class="ic"><use href="#i-upload"></use></svg> Drop files to upload here
+                    </div>
+                </div>
+                <div class="files-status" id="files-status"></div>
+            </div>
+        </aside>
+
+        <!-- Chat Drawer -->
+        <aside id="chat-drawer" class="drawer hidden" aria-label="Session chat">
+            <div class="drawer-header">
+                <h3><svg class="ic"><use href="#i-chat"></use></svg> Session Chat</h3>
+                <div class="drawer-header-actions">
+                    <button class="icon-btn" data-action="chat-clear" title="Clear local history"><svg class="ic"><use href="#i-trash"></use></svg></button>
+                    <button class="icon-btn" data-action="chat-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+                </div>
+            </div>
+            <div class="drawer-body chat-body">
+                <div class="chat-note" id="chat-note">Messages go to everyone connected to the active tab — generate a share link to invite somebody.</div>
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-input-row">
+                    <input type="text" id="chat-input" placeholder="Say something…" maxlength="2000" autocomplete="off" />
+                    <button class="btn-primary chat-send" data-action="chat-send"><svg class="ic ic-sm"><use href="#i-send"></use></svg></button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Activity Drawer -->
+        <aside id="activity-drawer" class="drawer hidden" aria-label="Activity center">
+            <div class="drawer-header">
+                <h3><svg class="ic"><use href="#i-list"></use></svg> Activity &amp; Insights</h3>
+                <div class="drawer-header-actions">
+                    <button class="icon-btn" data-action="activity-clear" title="Clear log"><svg class="ic"><use href="#i-trash"></use></svg></button>
+                    <button class="icon-btn" data-action="activity-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+                </div>
+            </div>
+            <div class="drawer-body">
+                <div class="insights-grid">
+                    <div class="stat-card"><span class="stat-label">Commands run</span><span class="stat-value" id="insight-cmds">0</span></div>
+                    <div class="stat-card"><span class="stat-label">Triggers fired</span><span class="stat-value" id="insight-triggers">0</span></div>
+                    <div class="stat-card"><span class="stat-label">Longest run</span><span class="stat-value" id="insight-longest">—</span></div>
+                    <div class="stat-card"><span class="stat-label">Session age</span><span class="stat-value" id="insight-age">—</span></div>
+                </div>
+                <div class="activity-list" id="activity-list"></div>
+            </div>
+        </aside>
+
+        <!-- AI Guide Drawer -->
+        <aside id="ai-drawer" class="drawer ai-drawer hidden" aria-label="AI Guide">
+            <div class="drawer-header">
+                <h3><svg class="ic"><use href="#i-sparkle"></use></svg> AI Guide</h3>
+                <div class="drawer-header-actions">
+                    <span class="ai-model-chip" id="ai-model-chip" title="Active model">qwen3.8-27b</span>
+                    <select id="ai-model-quick" class="ai-model-quick hidden" title="Model for this conversation" aria-label="Conversation model"></select>
+                    <button class="icon-btn" data-action="ai-clear" title="Clear conversation"><svg class="ic"><use href="#i-trash"></use></svg></button>
+                    <button class="icon-btn" data-action="ai-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+                </div>
+            </div>
+            <div class="drawer-body ai-body">
+                <div class="ai-mode-row" id="ai-mode-row">
+                    <button class="ai-mode-btn" data-action="ai-mode" data-mode="chat" title="Advice only — nothing runs automatically">💬 Chat</button>
+                    <button class="ai-mode-btn" data-action="ai-mode" data-mode="ask" title="Every command needs your approval">🔐 Ask</button>
+                    <button class="ai-mode-btn" data-action="ai-mode" data-mode="auto" title="Runs commands automatically — dangerous ones still ask">⚡ Auto</button>
+                </div>
+                <div class="ai-mode-desc" id="ai-mode-desc"></div>
+                <div class="ai-messages" id="ai-messages"></div>
+            </div>
+            <div class="ai-input-bar">
+                <div class="ai-target-row" id="ai-target-row">
+                    <svg class="ic ic-sm"><use href="#i-terminal"></use></svg>
+                    <span>Runs in: <strong id="ai-target-tab">active tab</strong></span>
+                </div>
+                <div class="ai-input-row">
+                    <textarea id="ai-input" rows="1" placeholder="Tell the AI what to do… (Enter to send, mic to dictate)" maxlength="4000"></textarea>
+                    <button class="btn-ghost ai-mic" id="ai-mic" data-action="ai-mic" title="Dictate with microphone (Whisper)"><svg class="ic ic-sm"><use href="#i-chat"></use></svg></button>
+                    <button class="btn-primary ai-send" id="ai-send-btn" data-action="ai-send" title="Send"><svg class="ic ic-sm"><use href="#i-send"></use></svg></button>
+                    <button class="btn-danger-solid ai-stop hidden" id="ai-stop-btn" data-action="ai-stop" title="Stop the agent">Stop</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Tasks Drawer -->
+        <aside id="tasks-drawer" class="drawer hidden" aria-label="Background tasks">
+            <div class="drawer-header">
+                <h3><svg class="ic"><use href="#i-rocket"></use></svg> Tasks &amp; Automations</h3>
+                <div class="drawer-header-actions">
+                    <button class="icon-btn" data-action="schedule-open" title="Scheduler"><svg class="ic"><use href="#i-clock"></use></svg></button>
+                    <button class="icon-btn" data-action="tasks-refresh" title="Refresh"><svg class="ic"><use href="#i-refresh"></use></svg></button>
+                    <button class="icon-btn" data-action="tasks-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+                </div>
+            </div>
+            <div class="drawer-body">
+                <div class="task-form">
+                    <input type="text" id="task-name" placeholder="Task name (optional)" maxlength="60" />
+                    <textarea id="task-cmd" rows="2" placeholder="Command to run in the background…"></textarea>
+                    <div class="task-form-row">
+                        <input type="text" id="task-cwd" placeholder="Folder (default: shell's cwd)" class="mono-input" />
+                        <label class="trigger-opt"><input type="checkbox" id="task-notify" checked /> <span>Notify on finish</span></label>
+                    </div>
+                    <button class="btn-primary" data-action="task-create" style="width:100%"><svg class="ic ic-sm"><use href="#i-play"></use></svg> Launch background task</button>
+                </div>
+                <div class="task-list" id="task-list"></div>
+            </div>
+        </aside>
+
+        <!-- Command Palette -->
+        <div id="palette-overlay" class="palette-overlay hidden">
+            <div class="palette-card" role="dialog" aria-label="Command palette">
+                <div class="palette-input-row">
+                    <svg class="ic"><use href="#i-zap"></use></svg>
+                    <input type="text" id="palette-input" placeholder="Type a command, action, macro or theme…" autocomplete="off" spellcheck="false" />
+                    <kbd class="palette-esc">Esc</kbd>
+                </div>
+                <div class="palette-list" id="palette-list"></div>
+                <div class="palette-footer">
+                    <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+                    <span><kbd>Enter</kbd> run</span>
+                    <span><kbd>Esc</kbd> close</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Terminal Context Menu -->
+        <div id="context-menu" class="ctx-menu hidden"></div>
+    </div>
+
+    <!-- Status Bar -->
+    <footer class="status-bar" id="status-bar">
+        <div class="sb-left">
+            <span class="conn-dot conn-wait" id="conn-dot"></span>
+            <span class="sb-text" id="conn-text">connecting…</span>
+            <span class="sb-chip" id="ping-chip" title="Latency">—</span>
+        </div>
+        <div class="sb-mid">
+            <span class="sb-text sb-title-text" id="sb-title">garuda konsole</span>
+            <span class="sb-chip sb-cwd-chip" id="sb-cwd" data-action="files-cwd-open" title="Shell's current folder — open in file manager">~</span>
+            <span class="sb-chip sb-git-chip hidden" id="git-chip" title="Git branch"><svg class="ic ic-sm"><use href="#i-corner"></use></svg><span id="git-branch">—</span></span>
+        </div>
+        <div class="sb-right">
+            <span class="sb-chip sb-chip-rec hidden" id="rec-chip" data-action="replay-open" title="Recording active — click to replay"><span class="rec-dot"></span><span id="rec-time">REC 0:00</span></span>
+            <span class="sb-chip sb-chip-chat hidden" id="chat-chip" data-action="chat-toggle" title="Session chat"><svg class="ic ic-sm"><use href="#i-chat"></use></svg><span id="chat-chip-badge" class="chip-badge hidden">0</span></span>
+            <span class="sb-chip sb-chip-live hidden" id="viewers-chip" data-action="share" title="Live viewers">
+                <span class="live-dot"></span><span id="viewers-chip-count">0</span> watching
+            </span>
+            <span class="sb-chip" id="cpu-chip" data-action="stats" title="CPU usage">cpu —</span>
+            <span class="sb-chip" id="mem-chip" data-action="stats" title="Memory usage">mem —</span>
+            <span class="sb-chip" id="font-chip" data-action="settings" title="Font size — open settings">14px</span>
+            <span class="sb-chip" id="clock-chip" title="Local time">--:--:--</span>
+        </div>
+    </footer>
+
+    <!-- Mobile Command Deck (3 adaptive rows) -->
+    <div class="mobile-keyboard" id="mobile-keyboard">
+        <div class="mobile-row row-symbols hidden" id="kb-row-symbols"></div>
+        <div class="mobile-row row-ctrl" id="kb-row-ctrl">
+            <button class="mk mk-ctrl" id="kb-ctrl" data-mkey="ctrl-mod" title="Sticky Ctrl — tap, then press a letter">Ctrl</button>
+            <button class="mk" data-mkey="esc">Esc</button>
+            <button class="mk" data-mkey="tab">Tab↹</button>
+            <button class="mk mk-danger" data-mkey="ctrl-c">C-c</button>
+            <button class="mk" data-mkey="ctrl-d">C-d</button>
+            <button class="mk" data-mkey="ctrl-z">C-z</button>
+            <button class="mk" data-mkey="ctrl-l">C-l</button>
+            <button class="mk" data-mkey="ctrl-r">C-r</button>
+            <button class="mk" data-mkey="ctrl-a">C-a</button>
+            <button class="mk" data-mkey="ctrl-e">C-e</button>
+            <button class="mk" data-mkey="ctrl-u">C-u</button>
+            <button class="mk mk-accent" data-mkey="sym-toggle" id="kb-sym-toggle" title="Symbol row">±</button>
+        </div>
+        <div class="mobile-row row-nav" id="kb-row-nav">
+            <button class="mk arrow-btn" data-mkey="up" title="Up">↑</button>
+            <button class="mk arrow-btn" data-mkey="down" title="Down">↓</button>
+            <button class="mk arrow-btn" data-mkey="left" title="Left">←</button>
+            <button class="mk arrow-btn" data-mkey="right" title="Right">→</button>
+            <button class="mk" data-mkey="tab-prev" title="Previous tab">◀︎</button>
+            <button class="mk" data-mkey="tab-next" title="Next tab">▶︎</button>
+            <button class="mk mk-accent scroll-btn" data-mkey="scroll-up" title="Hold to scroll up">▲</button>
+            <button class="mk mk-accent scroll-btn" data-mkey="scroll-down" title="Hold to scroll down">▼</button>
+            <button class="mk" id="mobile-alt-lock" data-mkey="altlock" title="Alt-Lock: select a filename to download">Alt⬇</button>
+            <button class="mk" data-mkey="kb-collapse" title="Hide this panel">⌄</button>
+        </div>
+        <div class="mobile-row row-fn" id="kb-row-fn">
+            <button class="mk" data-mkey="upload" title="Upload file">📤</button>
+            <button class="mk" data-mkey="files" title="File manager">Files</button>
+            <button class="mk" data-mkey="palette" title="Command palette">⚡</button>
+            <button class="mk" data-mkey="clear" title="Clear screen">Clr</button>
+            <button class="mk" data-mkey="font-up" title="Zoom in">A+</button>
+            <button class="mk" data-mkey="font-down" title="Zoom out">A−</button>
+            <button class="mk" data-mkey="share" title="Live share">👥</button>
+            <button class="mk" data-mkey="fullscreen" title="Fullscreen">⛶</button>
+            <button class="mk" data-mkey="settings" title="Settings">⚙</button>
+            <button class="mk" data-mkey="help" title="Help">?</button>
+        </div>
+    </div>
+</div>
+
+<!-- Floating handle to re-open collapsed mobile keyboard -->
+<button id="kb-expand-handle" class="kb-expand-handle hidden" data-action="kb-expand" title="Show keyboard controls">
+    <svg class="ic ic-sm"><use href="#i-chevs-up"></use></svg>
+</button>
+
+<!-- ══════════════ Modals ══════════════ -->
+
+<!-- Settings -->
+<div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="settings-close"></div>
+    <div class="modal-sheet" role="dialog" aria-label="Settings">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-sliders"></use></svg> Settings</h3>
+            <button class="icon-btn" data-action="settings-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+        </div>
+        <div class="modal-body">
+            <div class="setting-section">
+                <div class="setting-section-title"><svg class="ic ic-sm"><use href="#i-palette"></use></svg> Appearance</div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Terminal theme</span>
+                        <span class="setting-subtitle">20 built-in themes + your saved custom themes</span>
+                    </div>
+                    <div class="theme-select-row">
+                        <select id="setting-theme-select" class="theme-select">
+                            <optgroup label="Built-in themes" id="builtin-themes-group"></optgroup>
+                            <optgroup label="Custom themes" id="custom-themes-group"></optgroup>
+                        </select>
+                        <div id="theme-swatch" class="theme-swatch" title="Palette preview"></div>
+                        <button class="icon-btn" data-action="theme-random" title="Surprise me"><svg class="ic"><use href="#i-star"></use></svg></button>
+                    </div>
+                </div>
+                <div id="custom-themes-manage" class="custom-themes-manage hidden"></div>
+                <div class="custom-theme-toggle-wrap theme-tools-row">
+                    <button type="button" class="btn-subtle" data-action="toggle-theme-creator">
+                        <svg class="ic ic-sm"><use href="#i-plus"></use></svg> Create custom theme
+                    </button>
+                    <div class="theme-tools">
+                        <button class="btn-mini" data-action="theme-export" title="Download the active theme as JSON"><svg class="ic ic-sm"><use href="#i-download"></use></svg> Export</button>
+                        <button class="btn-mini" data-action="theme-import" title="Import a theme JSON file"><svg class="ic ic-sm"><use href="#i-upload"></use></svg> Import</button>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Day / night auto theme</span>
+                        <span class="setting-subtitle">Light theme 07:00–19:00, dark theme otherwise</span>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-auto-theme" /><span class="toggle-track"></span></label>
+                </div>
+                <div class="setting-row hidden" id="auto-theme-picks">
+                    <div class="setting-meta">
+                        <span class="setting-title">☀️ Light pick</span>
+                        <select id="setting-light-theme" class="select-mini auto-theme-select"></select>
+                    </div>
+                    <div class="setting-meta">
+                        <span class="setting-title">🌙 Dark pick</span>
+                        <select id="setting-dark-theme" class="select-mini auto-theme-select"></select>
+                    </div>
+                </div>
+                <div id="custom-theme-creator" class="custom-theme-creator hidden">
+                    <div class="creator-fields">
+                        <div class="creator-field">
+                            <label for="custom-theme-name">Theme name</label>
+                            <input type="text" id="custom-theme-name" placeholder="e.g. Neon Viper" maxlength="40" />
+                        </div>
+                        <div class="creator-colors-grid">
+                            <div class="color-picker-item"><label for="custom-color-bg">Background</label>
+                                <div class="color-input-wrap"><input type="color" id="custom-color-bg" value="#12151c" /><span class="color-hex" id="hex-bg">#12151c</span></div>
+                            </div>
+                            <div class="color-picker-item"><label for="custom-color-fg">Foreground</label>
+                                <div class="color-input-wrap"><input type="color" id="custom-color-fg" value="#e6edf3" /><span class="color-hex" id="hex-fg">#e6edf3</span></div>
+                            </div>
+                            <div class="color-picker-item"><label for="custom-color-cursor">Cursor</label>
+                                <div class="color-input-wrap"><input type="color" id="custom-color-cursor" value="#00f2fe" /><span class="color-hex" id="hex-cursor">#00f2fe</span></div>
+                            </div>
+                            <div class="color-picker-item"><label for="custom-color-accent">Accent</label>
+                                <div class="color-input-wrap"><input type="color" id="custom-color-accent" value="#3daee9" /><span class="color-hex" id="hex-accent">#3daee9</span></div>
+                            </div>
+                        </div>
+                        <div class="creator-preview-bar">
+                            <span>Preview</span>
+                            <div id="custom-creator-preview" class="creator-preview-chip">sample text</div>
+                        </div>
+                        <div class="creator-actions">
+                            <button type="button" class="btn-save-theme" data-action="save-custom-theme"><svg class="ic ic-sm"><use href="#i-save"></use></svg> Save &amp; apply</button>
+                            <span id="custom-theme-status" class="custom-status"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Font family</span>
+                        <span class="setting-subtitle">Monospace face used in the terminal</span>
+                    </div>
+                    <select id="setting-font-family" class="select-mini">
+                        <option value="'Fira Code', monospace">Fira Code</option>
+                        <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
+                        <option value="'Cascadia Code', 'Consolas', monospace">Cascadia / Consolas</option>
+                        <option value="'SF Mono', 'Menlo', monospace">SF Mono / Menlo</option>
+                        <option value="'DejaVu Sans Mono', 'Courier New', monospace">DejaVu Sans Mono</option>
+                        <option value="monospace">System monospace</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Font size <span class="setting-value-chip" id="font-size-value">14px</span></span>
+                    </div>
+                    <input type="range" id="setting-font-size" class="range-mini" min="8" max="28" step="1" />
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Cursor style</span>
+                    </div>
+                    <select id="setting-cursor-style" class="select-mini">
+                        <option value="block">Block ▮</option>
+                        <option value="bar">Bar │</option>
+                        <option value="underline">Underline _</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Blinking cursor</span>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-cursor-blink" /><span class="toggle-track"></span></label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Background opacity <span class="setting-value-chip" id="opacity-value">100%</span></span>
+                        <span class="setting-subtitle">Translucent terminal over the animated backdrop</span>
+                    </div>
+                    <input type="range" id="setting-opacity" class="range-mini" min="40" max="100" step="5" />
+                </div>
+            </div>
+
+            <div class="setting-section">
+                <div class="setting-section-title"><svg class="ic ic-sm"><use href="#i-keyboard"></use></svg> Sound &amp; Haptics</div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Mechanical keyboard</span>
+                        <span class="setting-subtitle">Tactile click sounds while typing</span>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-mech-keyboard" /><span class="toggle-track"></span></label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Interface sounds</span>
+                        <span class="setting-subtitle">Soft blips for actions, toasts and modals</span>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-ui-sounds" /><span class="toggle-track"></span></label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Haptic feedback</span>
+                        <span class="setting-subtitle">Vibration on mobile control keys (where supported)</span>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-haptics" /><span class="toggle-track"></span></label>
+                </div>
+            </div>
+
+            <div class="setting-section">
+                <div class="setting-section-title"><svg class="ic ic-sm"><use href="#i-bell"></use></svg> Notifications &amp; Motion</div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Device notifications</span>
+                        <span class="setting-subtitle" id="notif-status">—</span>
+                    </div>
+                    <div class="setting-row-actions">
+                        <button class="btn-mini" data-action="notif-test">Test</button>
+                        <button class="btn-primary" data-action="notif-enable" style="padding:7px 13px;font-size:12px">Enable</button>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Background push (browser closed)</span>
+                        <span class="setting-subtitle" id="push-status">Server push for tasks, triggers &amp; finished commands — needs HTTPS/localhost</span>
+                    </div>
+                    <div class="setting-row-actions">
+                        <button class="btn-mini" data-action="push-test">Test</button>
+                        <label class="toggle-switch"><input type="checkbox" id="setting-push" /><span class="toggle-track"></span></label>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Completion notifications</span>
+                        <span class="setting-subtitle">Notify when a long command finishes while the tab is hidden</span>
+                    </div>
+                    <div class="setting-row-actions">
+                        <button class="btn-mini" data-action="notif-test">Test</button>
+                        <label class="toggle-switch"><input type="checkbox" id="setting-completion-notif" /><span class="toggle-track"></span></label>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Boot animation</span>
+                        <span class="setting-subtitle">Startup sequence after unlocking</span>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-boot-anim" /><span class="toggle-track"></span></label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Reduce motion</span>
+                        <span class="setting-subtitle">Minimize animations and background effects</span>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-reduced-motion" /><span class="toggle-track"></span></label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Scroll speed <span class="setting-value-chip" id="scroll-speed-value">4</span></span>
+                        <span class="setting-subtitle">Lines per tick for the mobile scroll buttons</span>
+                    </div>
+                    <input type="range" id="setting-scroll-speed" class="range-mini" min="1" max="12" step="1" />
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Instant replay ring</span>
+                        <span class="setting-subtitle">Keep the last N seconds of output per tab for one-tap replay. Prunes inline with writes — no background cost.</span>
+                    </div>
+                    <div class="setting-row-actions">
+                        <select id="setting-ring-secs" class="select-mini">
+                            <option value="0">Off</option>
+                            <option value="30">30 s</option>
+                            <option value="60" selected>60 s</option>
+                            <option value="120">2 min</option>
+                            <option value="300">5 min</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Floating control ball</span>
+                        <span class="setting-subtitle">Draggable key-pad bubble for touch devices (Esc/Tab/Ctrl/arrows)</span>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-float-ball" /><span class="toggle-track"></span></label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Pinned macro bar</span>
+                        <span class="setting-subtitle">Quick-launch strip under the toolbar for pinned macros</span>
+                    </div>
+                    <label class="toggle-switch"><input type="checkbox" id="setting-pin-bar" /><span class="toggle-track"></span></label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Onboarding tour</span>
+                        <span class="setting-subtitle">Replay the guided walkthrough of new features</span>
+                    </div>
+                    <button class="btn-mini" data-action="tour-start"><svg class="ic ic-sm"><use href="#i-play"></use></svg> Take the tour</button>
+                </div>
+            </div>
+
+            <div class="setting-section">
+                <div class="setting-section-title"><svg class="ic ic-sm"><use href="#i-monitor"></use></svg> Server Sessions</div>
+                <div class="server-sessions-head">
+                    <span class="setting-subtitle">Shells living in server memory. Closing a browser tab does not kill them.</span>
+                    <button class="btn-mini" data-action="sessions-refresh"><svg class="ic ic-sm"><use href="#i-refresh"></use></svg> Refresh</button>
+                </div>
+                <div id="server-sessions-list" class="server-sessions-list"><div class="sessions-empty">No data yet</div></div>
+            </div>
+
+            <div class="setting-section">
+                <div class="setting-section-title"><svg class="ic ic-sm"><use href="#i-sparkle"></use></svg> AI Guide (Groq)</div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">API key</span>
+                        <span class="setting-subtitle" id="ai-key-status">Checking…</span>
+                    </div>
+                </div>
+                <div class="setting-row ai-key-row">
+                    <input type="password" id="setting-ai-key" class="prompt-input" placeholder="Paste a new Groq key (gsk_…) to replace" autocomplete="off" />
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Model</span>
+                        <span class="setting-subtitle">Groq model id used for the agent</span>
+                    </div>
+                    <select id="setting-ai-model" class="select-mini ai-model-input"></select>
+                </div>
+                <div class="setting-row hidden" id="ai-model-custom-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Custom model id</span>
+                    </div>
+                    <input type="text" id="setting-ai-model-custom" class="prompt-input ai-model-input" placeholder="provider/model-name" autocomplete="off" />
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Voice replies (Orpheus TTS)</span>
+                        <span class="setting-subtitle">Read assistant answers aloud; 🔊 on any message plays it too</span>
+                    </div>
+                    <div class="setting-row-actions">
+                        <select id="setting-ai-voice" class="select-mini"></select>
+                        <label class="toggle-switch"><input type="checkbox" id="setting-ai-voice-on" /><span class="toggle-track"></span></label>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Max output tokens <span class="setting-value-chip" id="ai-maxtokens-value">800</span></span>
+                        <span class="setting-subtitle">Must stay under your Groq plan's output-tokens-per-minute limit (on-demand tier is often 1000). Lower it if you see rate-limit errors.</span>
+                    </div>
+                    <input type="range" id="setting-ai-maxtokens" class="range-mini" min="64" max="1000" step="16" />
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Connection test</span>
+                        <span class="setting-subtitle" id="ai-test-result">—</span>
+                    </div>
+                    <div class="setting-row-actions">
+                        <button class="btn-mini" data-action="ai-reset-key" title="Forget the stored key and fall back to the server's built-in one">Reset key</button>
+                        <button class="btn-mini" data-action="ai-test">Test</button>
+                        <button class="btn-primary" data-action="ai-save-config" style="padding:7px 13px;font-size:12px">Save AI settings</button>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Command timeout</span>
+                        <span class="setting-subtitle">Seconds the agent waits for a command's output <span class="setting-value-chip" id="ai-timeout-value">20s</span></span>
+                    </div>
+                    <input type="range" id="setting-ai-timeout" class="range-mini" min="5" max="120" step="5" />
+                </div>
+            </div>
+
+            <div class="setting-section section-danger">
+                <div class="setting-section-title"><svg class="ic ic-sm"><use href="#i-alert"></use></svg> Danger Zone</div>
+                <div class="danger-actions">
+                    <button class="btn-danger-outline" data-action="reset-settings">Reset all settings</button>
+                    <button class="btn-danger-outline" data-action="lock"><svg class="ic ic-sm"><use href="#i-lock"></use></svg> Lock &amp; sign out</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Live Share -->
+<div id="share-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="share-close"></div>
+    <div class="modal-sheet" role="dialog" aria-label="Live share">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-users"></use></svg> Live Sharing &amp; Pair Programming</h3>
+            <button class="icon-btn" data-action="share-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+        </div>
+        <div class="modal-body">
+            <p class="share-intro">
+                Generate a secure link so teammates can watch your terminal stream live — or type right alongside you in the same shell.
+            </p>
+            <div class="share-field">
+                <label for="share-tab-select">Terminal tab</label>
+                <select id="share-tab-select" class="share-select"></select>
+            </div>
+            <div class="share-field">
+                <label>Collaboration mode</label>
+                <div class="share-mode-grid">
+                    <label class="share-mode-option">
+                        <input type="radio" name="share-mode-choice" value="readonly" id="mode-choice-readonly" checked />
+                        <div class="mode-box">
+                            <span class="mode-icon"><svg class="ic"><use href="#i-eye"></use></svg></span>
+                            <span class="mode-name">Spectator</span>
+                            <span class="mode-desc">Watch output in real time. Cannot type.</span>
+                        </div>
+                    </label>
+                    <label class="share-mode-option">
+                        <input type="radio" name="share-mode-choice" value="interactive" id="mode-choice-interactive" />
+                        <div class="mode-box">
+                            <span class="mode-icon"><svg class="ic"><use href="#i-users"></use></svg></span>
+                            <span class="mode-name">Interactive pair</span>
+                            <span class="mode-desc">Both sides type and run commands together.</span>
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div id="share-active-box" class="share-active-box hidden">
+                <div class="share-status-line">
+                    <span class="live-dot"></span>
+                    <span id="share-status-text">Live broadcast is active</span>
+                </div>
+                <div class="share-link-row">
+                    <input type="text" id="share-link-input" readonly />
+                    <button class="btn-copy-link" data-action="copy-share-link"><svg class="ic ic-sm"><use href="#i-copy"></use></svg> Copy</button>
+                </div>
+                <div id="share-copy-toast" class="share-copy-toast hidden">✓ Link copied to clipboard</div>
+                <div class="share-meta-row">
+                    <span class="share-viewers-count">Viewers: <strong id="modal-viewers-count">0</strong></span>
+                    <span class="share-expires" id="share-expires-text"></span>
+                </div>
+            </div>
+            <div class="share-actions">
+                <button type="button" id="btn-generate-share" class="btn-primary" data-action="generate-share"><svg class="ic ic-sm"><use href="#i-link"></use></svg> <span id="btn-generate-share-label">Generate live link</span></button>
+                <button type="button" id="btn-stop-share" class="btn-danger-outline hidden" data-action="revoke-share">Stop sharing</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Macros -->
+<div id="macros-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="macros-close"></div>
+    <div class="modal-sheet" role="dialog" aria-label="Macros">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-play"></use></svg> Macros &amp; Snippets</h3>
+            <button class="icon-btn" data-action="macros-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+        </div>
+        <div class="modal-body">
+            <p class="share-intro">One-tap commands sent to the active terminal. Saved on this device — build your own toolbox.</p>
+            <div class="macro-form">
+                <input type="text" id="macro-name" placeholder="Name (e.g. Update system)" maxlength="40" />
+                <textarea id="macro-command" rows="2" placeholder="Command (e.g. sudo pacman -Syu)"></textarea>
+                <button class="btn-primary" data-action="macro-save" id="macro-save-btn"><svg class="ic ic-sm"><use href="#i-save"></use></svg> <span id="macro-save-label">Add macro</span></button>
+            </div>
+            <div class="macro-list" id="macro-list"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Help -->
+<div id="help-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="help-close"></div>
+    <div class="modal-sheet" role="dialog" aria-label="Help">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-help"></use></svg> Garuda Konsole 2.0</h3>
+            <button class="icon-btn" data-action="help-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+        </div>
+        <div class="modal-body help-body">
+            <div class="help-section">
+                <h4>🎉 New in 4.0</h4>
+                <ul class="help-list">
+                    <li><strong>Installable PWA</strong> with push notifications for tasks, triggers &amp; finished commands — even with the browser closed.</li>
+                    <li><strong>Task Launcher</strong> (detached background jobs) + <strong>Scheduler</strong> (interval / daily / once, server-side).</li>
+                    <li><strong>Floating control ball</strong> + working touch selection with an AI-powered action bar.</li>
+                    <li><strong>Instant 60-second replay</strong>, file thumbnails + multi-select, share-sheet uploads.</li>
+                    <li><strong>v5:</strong> GPT-OSS 120B/20B model picker, <strong>voice replies</strong> (Orpheus TTS), <strong>mic dictation</strong> (Whisper), live task logs, and notification/push fixes.</li>
+                </ul>
+            </div>
+            <div class="help-section">
+                <h4>🤖 AI Guide (3.1)</h4>
+                <ul class="help-list">
+                    <li>Tell the AI what you want in plain language — it plans and runs the shell commands for you in the active tab.</li>
+                    <li><strong>💬 Chat</strong> — advice only; suggested commands get a manual “Run once” button.</li>
+                    <li><strong>🔐 Ask</strong> (default) — every command shows an approval card: Run, Edit or Skip. The agent waits for you.</li>
+                    <li><strong>⚡ Auto</strong> — commands run as they are proposed, output feeds back automatically, until the task is done. Catastrophic patterns (<code>rm -rf /</code>, <code>mkfs</code>, <code>dd of=/dev/…</code>, fork bombs, shutdowns, <code>curl | sh</code>…) <em>always</em> require explicit confirmation, even in Auto.</li>
+                    <li><strong>Stop</strong> halts the agent and sends Ctrl+C to the shell. The agent runs at most 12 commands per request.</li>
+                    <li>Your Groq API key lives <strong>server-side only</strong> (Settings → AI Guide) — it is never sent to the browser. Viewers/spectators cannot use the AI.</li>
+                </ul>
+            </div>
+            <div class="help-section">
+                <h4>🚀 What's new in 3.0</h4>
+                <ul class="help-list">
+                    <li><strong>Split view</strong> — run two tabs side by side (vertical / horizontal), focus follows your click. <kbd>Alt</kbd>+<kbd>S</kbd> cycles modes.</li>
+                    <li><strong>Session recorder &amp; replay</strong> — record any tab's output, then replay it like a video: scrub, pause, 0.5–16× speed, export as JSONL.</li>
+                    <li><strong>Triggers &amp; alerts</strong> — regex-watch output for errors, build results or any pattern; fire toasts, sounds or push notifications.</li>
+                    <li><strong>Session chat</strong> — talk with everyone connected to a tab (host, pair partners, spectators) without leaving the terminal.</li>
+                    <li><strong>Tab profiles</strong> — pick the shell, start folder, name and color for each new tab (right-click the + button).</li>
+                    <li><strong>Live cwd &amp; git branch</strong> — the status bar follows your shell's folder and shows the current git branch with a dirty flag.</li>
+                    <li><strong>Light themes &amp; day/night auto-switch</strong>, plus theme import/export as JSON.</li>
+                    <li><strong>Activity center</strong> — timeline of long commands, triggers, share events and uploads, with session insights.</li>
+                    <li><strong>File manager v2</strong> — recursive name search, image preview, full file details (permissions, owner, times).</li>
+                    <li><strong>Pinned macro bar</strong> — one-tap strip for your favorite commands, on desktop and mobile.</li>
+                    <li><strong>Smoother heavy output</strong> — frame-batched terminal writes keep huge outputs fluid.</li>
+                </ul>
+            </div>
+            <div class="help-section">
+                <h4>✨ From 2.0</h4>
+                <ul class="help-list">
+                    <li><strong>Session restore</strong> — refresh the page and every tab reconnects to its living shell with full scrollback replay.</li>
+                    <li><strong>Command palette</strong> — fuzzy search across actions, macros, recent commands and themes.</li>
+                    <li><strong>Shell revive</strong> — if a shell exits, restart it in place without losing the tab.</li>
+                    <li><strong>Mobile command deck</strong> — sticky Ctrl modifier, symbol row, arrows, tab navigation, haptics, collapsible keyboard.</li>
+                    <li><strong>Log export</strong> — save any tab's scrollback as a .log file.</li>
+                    <li><strong>Themed UI</strong> — the whole interface follows your terminal theme, with adjustable background opacity.</li>
+                </ul>
+            </div>
+            <div class="help-section">
+                <h4>⌨️ Keyboard shortcuts</h4>
+                <table class="help-table">
+                    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Command palette</td></tr>
+                    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Search terminal output</td></tr>
+                    <tr><td><kbd>Alt</kbd>+<kbd>T</kbd></td><td>New tab</td></tr>
+                    <tr><td><kbd>Alt</kbd>+<kbd>W</kbd></td><td>Close current tab</td></tr>
+                    <tr><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>Switch tabs</td></tr>
+                    <tr><td><kbd>Alt</kbd>+<kbd>S</kbd></td><td>Cycle split view (off → vertical → horizontal)</td></tr>
+                    <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>Move focus between split panes</td></tr>
+                    <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Settings</td></tr>
+                    <tr><td><kbd>Ctrl</kbd>+<kbd>L</kbd></td><td>Clear screen (shell)</td></tr>
+                    <tr><td><kbd>Esc</kbd></td><td>Close any overlay</td></tr>
+                </table>
+            </div>
+            <div class="help-section">
+                <h4>📱 Mobile tips</h4>
+                <ul class="help-list">
+                    <li><strong>Sticky Ctrl</strong> — tap <code>Ctrl</code> once, then any letter key on the OS keyboard combines (e.g. Ctrl+C).</li>
+                    <li><strong>Symbol row</strong> — tap <code>+/-</code> to reveal pipe, slash, tilde and friends.</li>
+                    <li><strong>Alt Lock</strong> — freeze the soft keyboard, select a filename in the output and it downloads instantly.</li>
+                    <li><strong>Scroll buttons</strong> — hold ▲/▼ for smooth continuous scrolling.</li>
+                    <li><strong>Collapse</strong> — tap ⌄ to hide the control deck for maximum screen.</li>
+                </ul>
+            </div>
+            <div class="help-section">
+                <h4>🔗 Live sharing</h4>
+                <ul class="help-list">
+                    <li>Spectator links mirror your terminal stream in real time; interactive links let a partner type into the same shell.</li>
+                    <li>Links expire automatically after 24 hours and can be revoked at any moment.</li>
+                </ul>
+            </div>
+            <div class="help-about">
+                <span id="help-version">Garuda Konsole</span> · crafted with xterm.js, Node.js &amp; ♥
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Mobile "More" sheet -->
+<div id="mobile-more-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="mobile-more-close"></div>
+    <div class="modal-sheet sheet-bottom" role="dialog" aria-label="More actions">
+        <div class="sheet-handle"></div>
+        <div class="more-grid" id="more-grid">
+            <button class="more-tile" data-action="share"><svg class="ic"><use href="#i-users"></use></svg><span>Share</span></button>
+            <button class="more-tile" data-action="stats"><svg class="ic"><use href="#i-activity"></use></svg><span>Monitor</span></button>
+            <button class="more-tile" data-action="clear"><svg class="ic"><use href="#i-refresh"></use></svg><span>Clear</span></button>
+            <button class="more-tile" data-action="altlock"><svg class="ic"><use href="#i-download"></use></svg><span>Alt Lock</span></button>
+            <button class="more-tile" data-action="upload"><svg class="ic"><use href="#i-upload"></use></svg><span>Upload</span></button>
+            <button class="more-tile" data-action="macros"><svg class="ic"><use href="#i-play"></use></svg><span>Macros</span></button>
+            <button class="more-tile" data-action="ai-toggle"><svg class="ic"><use href="#i-sparkle"></use></svg><span>AI Guide</span></button>
+            <button class="more-tile" data-action="voice-cmd"><svg class="ic"><use href="#i-chat"></use></svg><span>Voice cmd</span></button>
+            <button class="more-tile" data-action="tasks-toggle"><svg class="ic"><use href="#i-rocket"></use></svg><span>Tasks</span></button>
+            <button class="more-tile" data-action="schedule-open"><svg class="ic"><use href="#i-clock"></use></svg><span>Schedule</span></button>
+            <button class="more-tile" data-action="record-toggle"><svg class="ic"><use href="#i-record"></use></svg><span>Record</span></button>
+            <button class="more-tile" data-action="chat-toggle"><svg class="ic"><use href="#i-chat"></use></svg><span>Chat</span></button>
+            <button class="more-tile" data-action="activity-toggle"><svg class="ic"><use href="#i-list"></use></svg><span>Activity</span></button>
+            <button class="more-tile" data-action="triggers"><svg class="ic"><use href="#i-bell"></use></svg><span>Triggers</span></button>
+            <button class="more-tile" data-action="profile-open"><svg class="ic"><use href="#i-terminal"></use></svg><span>New profile</span></button>
+            <button class="more-tile" data-action="search"><svg class="ic"><use href="#i-search"></use></svg><span>Search</span></button>
+            <button class="more-tile" data-action="export-log"><svg class="ic"><use href="#i-save"></use></svg><span>Export log</span></button>
+            <button class="more-tile" data-action="font-up"><svg class="ic"><use href="#i-plus"></use></svg><span>Zoom in</span></button>
+            <button class="more-tile" data-action="font-down"><svg class="ic"><use href="#i-minimize"></use></svg><span>Zoom out</span></button>
+            <button class="more-tile" data-action="fullscreen"><svg class="ic"><use href="#i-maximize"></use></svg><span>Fullscreen</span></button>
+            <button class="more-tile" data-action="settings"><svg class="ic"><use href="#i-sliders"></use></svg><span>Settings</span></button>
+            <button class="more-tile" data-action="help"><svg class="ic"><use href="#i-help"></use></svg><span>Help</span></button>
+            <button class="more-tile" data-action="lock"><svg class="ic"><use href="#i-lock"></use></svg><span>Lock</span></button>
+        </div>
+    </div>
+</div>
+
+<!-- Generic prompt dialog -->
+<div id="prompt-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="prompt-cancel"></div>
+    <div class="modal-sheet sheet-narrow" role="dialog" aria-label="Input">
+        <div class="sheet-handle"></div>
+        <div class="modal-header"><h3 id="prompt-title">Rename</h3></div>
+        <div class="modal-body">
+            <p class="prompt-message" id="prompt-message"></p>
+            <input type="text" id="prompt-input" class="prompt-input" autocomplete="off" />
+        </div>
+        <div class="modal-footer">
+            <button class="btn-ghost" data-action="prompt-cancel">Cancel</button>
+            <button class="btn-primary" data-action="prompt-ok" id="prompt-ok">OK</button>
+        </div>
+    </div>
+</div>
+
+<!-- Generic confirm dialog -->
+<div id="confirm-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="confirm-cancel"></div>
+    <div class="modal-sheet sheet-narrow" role="dialog" aria-label="Confirm">
+        <div class="sheet-handle"></div>
+        <div class="modal-header"><h3 id="confirm-title">Are you sure?</h3></div>
+        <div class="modal-body"><p class="prompt-message" id="confirm-message"></p></div>
+        <div class="modal-footer">
+            <button class="btn-ghost" data-action="confirm-cancel">Cancel</button>
+            <button class="btn-danger-solid" data-action="confirm-ok" id="confirm-ok">Delete</button>
+        </div>
+    </div>
+</div>
+
+<!-- File preview -->
+<div id="preview-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="preview-close"></div>
+    <div class="modal-sheet sheet-wide" role="dialog" aria-label="File preview">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3 class="ellipsis"><svg class="ic"><use href="#i-file"></use></svg> <span id="preview-name">file</span></h3>
+            <div class="drawer-header-actions">
+                <button class="icon-btn" id="preview-download-btn" data-action="preview-download" title="Download"><svg class="ic"><use href="#i-download"></use></svg></button>
+                <button class="icon-btn" data-action="preview-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+            </div>
+        </div>
+        <div class="modal-body preview-body">
+            <img id="preview-image" class="preview-image hidden" alt="Image preview" />
+            <pre id="preview-content" class="preview-content"></pre>
+        </div>
+    </div>
+</div>
+
+<!-- Scheduler -->
+<div id="schedule-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="schedule-close"></div>
+    <div class="modal-sheet" role="dialog" aria-label="Scheduler">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-clock"></use></svg> Scheduler</h3>
+            <button class="icon-btn" data-action="schedule-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+        </div>
+        <div class="modal-body">
+            <p class="share-intro">Run commands on a timer — <strong>on the server</strong>, so schedules keep working with every browser closed. Each run becomes a background task and can push-notify you.</p>
+            <div class="trigger-form">
+                <input type="text" id="sched-name" placeholder="Name (e.g. Nightly backup)" maxlength="60" />
+                <input type="text" id="sched-cmd" class="mono-input" placeholder="Command…" maxlength="2000" />
+                <div class="trigger-options">
+                    <select id="sched-type" class="select-mini">
+                        <option value="interval">Every N minutes</option>
+                        <option value="daily">Daily at time</option>
+                        <option value="once">Once at timestamp</option>
+                    </select>
+                    <input type="number" id="sched-every" class="select-mini sched-num" min="1" max="525600" value="60" title="Minutes" />
+                    <input type="time" id="sched-at-time" class="select-mini sched-time" value="03:00" />
+                    <input type="number" id="sched-at-epoch" class="select-mini sched-num hidden" placeholder="epoch ms" />
+                    <label class="trigger-opt"><input type="checkbox" id="sched-notify" checked /> <span>push notify</span></label>
+                </div>
+                <button class="btn-primary" data-action="schedule-save" id="schedule-save-btn"><svg class="ic ic-sm"><use href="#i-save"></use></svg> <span id="schedule-save-label">Add schedule</span></button>
+            </div>
+            <div class="trigger-list" id="schedule-list"></div>
+        </div>
+    </div>
+</div>
+
+<!-- What's new -->
+<div id="news-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="news-close"></div>
+    <div class="modal-sheet" role="dialog" aria-label="What's new">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-sparkle"></use></svg> What's new in 4.0</h3>
+            <button class="icon-btn" data-action="news-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+        </div>
+        <div class="modal-body help-body">
+            <div class="help-section">
+                <h4>📲 Install it like a real app</h4>
+                <ul class="help-list">
+                    <li>Chrome can now <strong>install Garuda Konsole</strong> (proper PNG icons + manifest). Needs HTTPS or localhost — see README for 3 easy ways (adb reverse, Caddy TLS, tailscale).</li>
+                    <li><strong>Share sheet → Garuda</strong>: installed PWAs appear in Android's share menu; shared files land in <code>~/GarudaUploads</code>.</li>
+                </ul>
+            </div>
+            <div class="help-section">
+                <h4>🔔 Web Push — notifications with the browser closed</h4>
+                <ul class="help-list">
+                    <li>Background push for: finished <strong>tasks</strong>, <strong>trigger</strong> matches (server-side!), shell exits and finished long commands — even when nothing is open. Enable in Settings → Notifications.</li>
+                </ul>
+            </div>
+            <div class="help-section">
+                <h4>🚀 Task Launcher &amp;  Scheduler</h4>
+                <ul class="help-list">
+                    <li>Run commands <strong>detached</strong> in the background with live tail logs, kill/re-run — they survive closing the browser.</li>
+                    <li><strong>Interactive tasks (4.1):</strong> if a background task asks for a password or y/n, you get a push + a “needs input” chip and can answer right in the Tasks drawer.</li>
+                    <li>Schedule them: every N minutes, daily at a time, or once. All server-side.</li>
+                </ul>
+            </div>
+            <div class="help-section">
+                <h4>📱 Mobile superpowers</h4>
+                <ul class="help-list">
+                    <li><strong>Floating control ball</strong> — drag anywhere, tap for Esc/Tab/Ctrl/arrows. Collapse the whole keyboard deck for good.</li>
+                    <li><strong>Touch text selection that finally works</strong>: long-press selects a word, horizontal drag selects a range — no keyboard pop-up, no native copy/paste bubble. A custom bar offers Copy / Explain with AI / Fix with AI / Download.</li>
+                    <li>File manager: <strong>thumbnail grid</strong>, <strong>multi-select</strong> bulk download/delete.</li>
+                </ul>
+            </div>
+            <div class="help-section">
+                <h4>⏪ Instant replay &amp; 🤖 AI polish</h4>
+                <ul class="help-list">
+                    <li><strong>Replay last 60 s</strong> of any tab (right-click → Replay recent). Ring buffer prunes inline with output — zero timers, zero idle cost, hard 2 MB cap per tab.</li>
+                    <li>AI approval cards now always scroll into view &amp; open the drawer; auto mode is badged; approval waits notify you.</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" data-action="news-close" style="width:100%">Awesome — let's go 🦅</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recording Replay -->
+<div id="replay-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="replay-close"></div>
+    <div class="modal-sheet sheet-wide" role="dialog" aria-label="Recording replay">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-record"></use></svg> <span id="replay-title">Session Replay</span></h3>
+            <div class="drawer-header-actions">
+                <button class="icon-btn" data-action="replay-export" title="Export recording (.jsonl)"><svg class="ic"><use href="#i-download"></use></svg></button>
+                <button class="icon-btn" data-action="replay-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+            </div>
+        </div>
+        <div class="modal-body replay-body">
+            <div id="replay-term" class="replay-term"></div>
+            <div class="replay-controls">
+                <button class="icon-btn replay-play" data-action="replay-play" id="replay-play-btn" title="Play / pause"><svg class="ic"><use href="#i-play"></use></svg></button>
+                <button class="icon-btn" data-action="replay-restart" title="Restart"><svg class="ic"><use href="#i-refresh"></use></svg></button>
+                <input type="range" id="replay-scrub" class="range-mini replay-scrub" min="0" max="1000" value="0" step="1" />
+                <span class="replay-time" id="replay-time">0:00 / 0:00</span>
+                <select id="replay-speed" class="select-mini" title="Playback speed">
+                    <option value="0.5">0.5×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="2">2×</option>
+                    <option value="4">4×</option>
+                    <option value="8">8×</option>
+                    <option value="16">16×</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New Tab Profile -->
+<div id="profile-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="profile-close"></div>
+    <div class="modal-sheet sheet-narrow" role="dialog" aria-label="New tab profile">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-terminal"></use></svg> New Tab — Profile</h3>
+            <button class="icon-btn" data-action="profile-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+        </div>
+        <div class="modal-body">
+            <div class="creator-field">
+                <label for="profile-name">Tab name (optional)</label>
+                <input type="text" id="profile-name" placeholder="e.g. deploy server" maxlength="40" />
+            </div>
+            <div class="creator-field">
+                <label for="profile-shell">Shell</label>
+                <select id="profile-shell" class="share-select"></select>
+            </div>
+            <div class="creator-field">
+                <label for="profile-cwd">Start directory</label>
+                <div class="profile-cwd-row">
+                    <input type="text" id="profile-cwd" placeholder="(shell default)" />
+                </div>
+                <div class="profile-cwd-actions">
+                    <button class="btn-mini" data-action="profile-use-cwd"><svg class="ic ic-sm"><use href="#i-corner"></use></svg> Use current shell's folder</button>
+                    <button class="btn-mini" data-action="profile-use-home"><svg class="ic ic-sm"><use href="#i-home"></use></svg> Home</button>
+                </div>
+            </div>
+            <div class="creator-field">
+                <label>Tab color</label>
+                <div class="profile-colors" id="profile-colors"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-ghost" data-action="profile-close">Cancel</button>
+            <button class="btn-primary" data-action="profile-create"><svg class="ic ic-sm"><use href="#i-plus"></use></svg> Create tab</button>
+        </div>
+    </div>
+</div>
+
+<!-- Triggers -->
+<div id="triggers-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="triggers-close"></div>
+    <div class="modal-sheet" role="dialog" aria-label="Output triggers">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-bell"></use></svg> Triggers &amp; Alerts</h3>
+            <button class="icon-btn" data-action="triggers-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+        </div>
+        <div class="modal-body">
+            <p class="share-intro">Watch terminal output with regular expressions. When a line matches — get a toast, a sound or a push notification. Great for long builds, test runs or error watch.</p>
+            <div class="trigger-form">
+                <input type="text" id="trigger-name" placeholder="Name (e.g. Build failed)" maxlength="40" />
+                <input type="text" id="trigger-pattern" class="mono-input" placeholder="Regex pattern (e.g. error|failed|FAILED)" maxlength="200" />
+                <div class="trigger-options">
+                    <label class="trigger-opt"><input type="checkbox" id="trigger-case" /> <span>Aa case-sensitive</span></label>
+                    <label class="trigger-opt"><input type="checkbox" id="trigger-act-toast" checked /> <span>🔔 toast</span></label>
+                    <label class="trigger-opt"><input type="checkbox" id="trigger-act-sound" checked /> <span>🔊 sound</span></label>
+                    <label class="trigger-opt"><input type="checkbox" id="trigger-act-notify" /> <span>📣 push</span></label>
+                    <select id="trigger-scope" class="select-mini">
+                        <option value="all">All tabs</option>
+                        <option value="active">Active tab only</option>
+                    </select>
+                </div>
+                <div class="trigger-test-row">
+                    <input type="text" id="trigger-test-input" class="mono-input" placeholder="Test against a sample line…" />
+                    <button class="btn-mini" data-action="trigger-test">Test</button>
+                    <span class="trigger-test-result" id="trigger-test-result"></span>
+                </div>
+                <button class="btn-primary" data-action="trigger-save" id="trigger-save-btn"><svg class="ic ic-sm"><use href="#i-save"></use></svg> <span id="trigger-save-label">Add trigger</span></button>
+            </div>
+            <div class="trigger-list" id="trigger-list"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Onboarding Tour -->
+<div id="tour-overlay" class="tour-overlay hidden">
+    <div class="tour-backdrop" data-action="tour-skip"></div>
+    <div class="tour-ring" id="tour-ring"></div>
+    <div class="tour-tooltip" id="tour-tooltip">
+        <div class="tour-step-count" id="tour-step-count">1 / 7</div>
+        <div class="tour-title" id="tour-title">Welcome</div>
+        <div class="tour-text" id="tour-text">…</div>
+        <div class="tour-actions">
+            <button class="btn-ghost tour-skip" data-action="tour-skip">Skip tour</button>
+            <button class="btn-primary" data-action="tour-next" id="tour-next-btn">Next →</button>
+        </div>
+    </div>
+</div>
+
+<!-- Mobile selection toolbar -->
+<div id="sel-toolbar" class="sel-toolbar hidden">
+    <button data-action="sel-copy" title="Copy selection"><svg class="ic"><use href="#i-copy"></use></svg><span>Copy</span></button>
+    <button data-action="sel-explain" title="Explain with AI"><svg class="ic"><use href="#i-sparkle"></use></svg><span>Explain</span></button>
+    <button data-action="sel-fix" title="Diagnose &amp; fix with AI"><svg class="ic"><use href="#i-robot"></use></svg><span>Fix</span></button>
+    <button data-action="sel-download" title="Download matching file"><svg class="ic"><use href="#i-download"></use></svg><span>File</span></button>
+    <button data-action="sel-clear" class="sel-done" title="Clear selection"><svg class="ic"><use href="#i-x"></use></svg></button>
+</div>
+
+<!-- Floating control ball -->
+<div id="float-ball" class="float-ball hidden" title="Drag to move · tap for keys">
+    <svg class="ic"><use href="#i-keyboard"></use></svg>
+</div>
+<div id="float-ball-pad" class="float-ball-pad hidden">
+    <button class="fb-key" data-mkey="esc">Esc</button>
+    <button class="fb-key" data-mkey="tab">Tab</button>
+    <button class="fb-key fb-ctrl" id="fb-ctrl" data-mkey="ctrl-mod">Ctrl</button>
+    <button class="fb-key" data-mkey="up">↑</button>
+    <button class="fb-key" data-mkey="down">↓</button>
+    <button class="fb-key" data-mkey="left">←</button>
+    <button class="fb-key" data-mkey="right">→</button>
+    <button class="fb-key fb-danger" data-mkey="ctrl-c">C-c</button>
+    <button class="fb-key" data-mkey="ctrl-l">C-l</button>
+    <button class="fb-key" data-mkey="kb-toggle">⌨</button>
+    <button class="fb-key fb-close" data-mkey="ball-close">✕</button>
+</div>
+
+<!-- Toasts -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+<!-- Addons -->
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
+<script src="app.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>

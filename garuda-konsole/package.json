@@ -1,0 +1,37 @@
+{
+  "name": "garuda-konsole",
+  "version": "5.1.0",
+  "description": "Garuda Konsole 3.1 — a beautiful persistent web terminal with an AI shell agent, split panes, session replay, triggers, live chat, file manager and system monitor.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test/api-test.js && node test/frontend-test.js && node test/static-check.js"
+  },
+  "keywords": [
+    "terminal",
+    "web-terminal",
+    "xterm",
+    "ssh",
+    "pty",
+    "remote-shell"
+  ],
+  "type": "commonjs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "express-fileupload": "^1.5.2",
+    "node-pty": "^1.1.0",
+    "web-push": "^3.6.7",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
+  }
+}
