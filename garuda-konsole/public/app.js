@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.1.4';
+const APP_VERSION = '5.1.5';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -684,6 +684,11 @@ function handleServerNotify(ctrl) {
 
 /* ─────────────── Text-to-speech (Orpheus via server proxy) ─────────────── */
 let speakAudio = null;
+/* Generation guard: stopSpeaking() — and every new speakText() — invalidates
+   any in-flight TTS render. Without it, pressing Stop while the voice was
+   still being fetched started playback AFTER the stop (speakAudio is null
+   until the response arrives, so there was nothing to pause yet). */
+let speakGeneration = 0;
 
 async function speakText(text, opts) {
     const clean = String(text || '')
@@ -693,6 +698,7 @@ async function speakText(text, opts) {
         .trim()
         .slice(0, 1500);
     if (!clean) return false;
+    const gen = ++speakGeneration;
     try {
         if (speakAudio) { try { speakAudio.pause(); speakAudio.src = ''; } catch (e) {} speakAudio = null; }
         const res = await fetch('/api/ai/speech', {
@@ -700,6 +706,7 @@ async function speakText(text, opts) {
             headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
             body: JSON.stringify({ text: clean, voice: (opts && opts.voice) || getSettings().aiVoiceName || 'autumn' })
         });
+        if (gen !== speakGeneration) return false; // stopped (or superseded) while rendering
         if (!res.ok) {
             const j = await res.json().catch(() => null);
             const msg = (j && j.error) || 'Speech failed';
@@ -707,10 +714,12 @@ async function speakText(text, opts) {
             return false;
         }
         const blob = await res.blob();
+        if (gen !== speakGeneration) return false; // stopped (or superseded) during transfer
         const url = URL.createObjectURL(blob);
-        speakAudio = new Audio(url);
-        speakAudio.onended = () => { URL.revokeObjectURL(url); speakAudio = null; };
-        await speakAudio.play();
+        const audio = new Audio(url);
+        speakAudio = audio;
+        audio.onended = () => { URL.revokeObjectURL(url); if (speakAudio === audio) speakAudio = null; };
+        await audio.play();
         return true;
     } catch (e) {
         return false;
@@ -718,6 +727,7 @@ async function speakText(text, opts) {
 }
 
 function stopSpeaking() {
+    speakGeneration++; // abort any in-flight render so nothing starts AFTER this stop
     if (speakAudio) { try { speakAudio.pause(); speakAudio.src = ''; } catch (e) {} speakAudio = null; }
 }
 
@@ -2651,6 +2661,10 @@ async function agentLoop(myGen) {
 }
 
 function aiStop() {
+    /* Stop means stop — silence the agent's voice too. The spoken reply of
+       the run being stopped (and any TTS still rendering for it) would
+       otherwise keep talking over the stopped agent. */
+    stopSpeaking();
     if (!aiState.busy) return;
     aiState.stopped = true;
     if (aiState.pending) aiResolveDecision('skip');

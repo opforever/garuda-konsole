@@ -1,8 +1,8 @@
-# Garuda Konsole 5.1.4 🦅
+# Garuda Konsole 5.1.5 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.1.4-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-376%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.1.5-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-383%20passing-2fd07a)
 
 ---
 
@@ -196,7 +196,7 @@ Default password: `20090228` (unchanged). Override everything via env:
 
 ## 🧪 Tests
 ```bash
-npm test           # api-test (143) + frontend-test (233) + static-check
+npm test           # api-test (143) + frontend-test (240) + static-check
 ```
 Each suite boots its own isolated server instance — no manual setup needed.
 The AI E2E tests stub `/api/ai/chat` in-page, so they never consume your Groq quota
@@ -210,6 +210,18 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🩹 What's new in 5.1.5 — Stop means stop (silences the voice too)
+
+Real-world bug report: *with voice replies enabled, the AI keeps talking after you hit the agent's **Stop** button.*
+
+Two bugs, one fix:
+
+- **`aiStop()` never touched the speech player** — it stopped the agent run, but the spoken reply already playing (or still rendering) kept talking over it. Stop now calls `stopSpeaking()` first.
+- **A race made Stop unreliable even in principle**: `speakText()` awaits the TTS network render before an audio element exists, so hitting Stop *while a reply was still rendering* found nothing to pause — and the voice then **started playing after the stop**. Speech now carries a generation token: `stopSpeaking()` (and every newer speech) invalidates any in-flight render, which aborts instead of playing late.
+- Bonus hardening: an ending clip can no longer null out a *newer* clip's audio reference (stale `onended` guard), and clearing the conversation silences speech too (it routes through `aiStop`).
+
+Tests (+7, verified red against pre-fix code): stop-mid-render never plays, `speakText` resolves false when stopped, normal playback + pause works, **`aiStop` silences the playing voice** while still stopping the run. Frontend **240**, API **143**, static checks clean.
 
 ## 🎨 What's new in 5.1.4 — buttons finally look clickable
 

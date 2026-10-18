@@ -940,6 +940,59 @@ function visible(win, id) {
     await tick(150);
     check('mic degrades gracefully without MediaRecorder', rwin.document.getElementById('toast-container').textContent.includes('Microphone'));
 
+    /* ── 5.1.5: Stop button silences voice replies ── */
+    console.log('── 5.1.5: stop button silences voice ──');
+    rwin.eval(`
+        window.__played = 0; window.__paused = 0; window.__speechGate = null;
+        window.__OrigAudioStub = window.Audio;
+        window.Audio = function A(url) {
+            this.src = url;
+            this.play = () => { window.__played++; return Promise.resolve(); };
+            this.pause = () => { window.__paused++; };
+        };
+        (function(){
+            const prev = window.fetch;
+            window.__restoreSpeechFetch2 = function () { window.fetch = prev; };
+            window.fetch = function (url, opts) {
+                if (String(url).includes('/api/ai/speech')) {
+                    /* Gated: the render only resolves when the test releases it,
+                       so we can stop WHILE the TTS request is in flight. */
+                    return new Promise((resolve) => {
+                        window.__speechGate = () => resolve({ ok: true, status: 200, headers: { get: () => 'audio/wav' }, blob: () => Promise.resolve(new Blob(['wavbytes'], { type: 'audio/wav' })) });
+                    });
+                }
+                return prev(url, opts);
+            };
+        })();
+    `);
+    /* a) stop mid-render: the in-flight TTS must NOT start playing afterwards */
+    ev(rwin, `window.__spokeA = speakText('rendering while stopped')`);
+    await tick(60);
+    ev(rwin, 'stopSpeaking()');
+    ev(rwin, `window.__speechGate && window.__speechGate()`);
+    await tick(120);
+    check('speech stopped mid-render never starts playing', ev(rwin, 'window.__played') === 0);
+    check('speakText resolves false when stopped mid-render', (await ev(rwin, 'window.__spokeA')) === false);
+    /* b) normal playback, then stopSpeaking pauses the audio element */
+    ev(rwin, `window.__spokeB = speakText('hello again')`);
+    await tick(60);
+    ev(rwin, `window.__speechGate && window.__speechGate()`);
+    await tick(150);
+    check('speech plays when not stopped', ev(rwin, 'window.__played') === 1);
+    ev(rwin, 'stopSpeaking()');
+    check('stopSpeaking pauses the playing audio', ev(rwin, 'window.__paused') >= 1);
+    /* c) the agent Stop button silences the voice reply too */
+    ev(rwin, `window.__played = 0; window.__paused = 0; aiState.busy = true; aiState.stopped = false; aiState.pending = null; aiState.tabId = null;`);
+    ev(rwin, `window.__spokeC = speakText('agent reply')`);
+    await tick(60);
+    ev(rwin, `window.__speechGate && window.__speechGate()`);
+    await tick(150);
+    check('agent reply voice is playing before Stop', ev(rwin, 'window.__played') === 1);
+    ev(rwin, 'aiStop()');
+    check('aiStop silences the currently playing voice', ev(rwin, 'window.__paused') >= 1);
+    check('aiStop still stops the agent run itself', ev(rwin, 'aiState.stopped') === true && ev(rwin, 'aiState.busy') === true);
+    ev(rwin, `aiState.busy = false; aiState.stopped = false; window.__restoreSpeechFetch2 && window.__restoreSpeechFetch2(); window.Audio = window.__OrigAudioStub;`);
+
     console.log('── 5.0: live task log viewer ──');
     const tokR2 = ev(rwin, 'token');
     const ltRes = await (await fetch(new URL('/api/tasks', BASE), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tokR2 }, body: JSON.stringify({ name: 'live log', cmd: 'echo L1_START; sleep 1.6; echo L2_DONE_LATER', notify: false }) })).json();

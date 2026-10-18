@@ -3,7 +3,7 @@
    notifications even with the browser fully closed. */
 'use strict';
 
-const CACHE = 'garuda-konsole-v5.1.4';
+const CACHE = 'garuda-konsole-v5.1.5';
 const SHELL = [
     '/',
     '/index.html',
