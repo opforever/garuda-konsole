@@ -86,6 +86,41 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     r = await j(`${B}/server.js`);
     check('server.js NOT served (source hidden)', r.status === 404);
 
+    /* ── PWA shell assets ──
+       Regression: the manifest once shipped renamed to
+       "manifest.webmanifest.temporaryextension.txt" (upload artifact), so the
+       <link rel="manifest"> in index.html and the sw.js precache both 404'd —
+       PWA install broke and two frontend tests failed. These checks pin the
+       HTML/manifest/SW references to files that actually exist on disk. */
+    const idxText = await (await fetch(`${B}/index.html`)).text();
+    const manHref = (idxText.match(/rel="manifest"\s+href="([^"]+)"/) || [])[1];
+    check('index.html declares a manifest link', !!manHref);
+
+    const manRes = await fetch(`${B}/${(manHref || 'manifest.webmanifest').replace(/^\//, '')}`);
+    let man = null;
+    try { man = await manRes.json(); } catch (e) {}
+    check('manifest served at the linked path as valid JSON', manRes.status === 200 && !!man && !!man.name && !!man.start_url);
+
+    if (man && Array.isArray(man.icons)) {
+        const iconResults = await Promise.all(man.icons.map((ic) => fetch(`${B}/${String(ic.src).replace(/^\//, '')}`).then((x) => x.status)));
+        check('every manifest icon src resolves', iconResults.length > 0 && iconResults.every((s) => s === 200), iconResults.join(','));
+        check('manifest ships a PNG icon (Chrome install requirement)', man.icons.some((ic) => String(ic.src).endsWith('.png')));
+    } else {
+        check('every manifest icon src resolves', false, 'manifest.icons missing');
+        check('manifest ships a PNG icon (Chrome install requirement)', false, 'manifest.icons missing');
+    }
+
+    const swText = await (await fetch(`${B}/sw.js`)).text();
+    const shellMatch = swText.match(/const SHELL = \[([\s\S]*?)\];/);
+    check('sw.js served with parseable precache list', !!shellMatch);
+    if (shellMatch) {
+        const localUrls = [...shellMatch[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).filter((u) => !/^https?:/.test(u));
+        const shellResults = await Promise.all(localUrls.map((u) => fetch(`${B}${u}`).then((x) => x.status).catch(() => 0)));
+        check('every locally precached shell asset resolves', shellResults.every((s) => s === 200), localUrls.filter((_, i) => shellResults[i] !== 200).join(', '));
+    } else {
+        check('every locally precached shell asset resolves', false, 'SHELL list not found in sw.js');
+    }
+
     r = await j(`${B}/api/sessions`);
     check('sessions requires auth', r.status === 401);
 

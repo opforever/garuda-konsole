@@ -2,7 +2,7 @@
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.0.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-315%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.0.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-343%20passing-2fd07a)
 
 ---
 
@@ -196,7 +196,7 @@ Default password: `20090228` (unchanged). Override everything via env:
 
 ## 🧪 Tests
 ```bash
-npm test           # api-test (121) + frontend-test (194) + static-check
+npm test           # api-test (131) + frontend-test (212) + static-check
 ```
 Each suite boots its own isolated server instance — no manual setup needed.
 The AI E2E tests stub `/api/ai/chat` in-page, so they never consume your Groq quota
@@ -225,4 +225,4 @@ Everything below rides on the same three model families (chat: Qwen3.8-27B / GPT
 
 > TTS note: Orpheus needs a **one-time terms acceptance** in the Groq console (the server surfaces the exact URL if it's missing). STT works out of the box.
 
-Test totals: API **125**, frontend **212**, static checks clean.
+Test totals: API **131**, frontend **212**, static checks clean.
