@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-    <link rel="stylesheet" href="style.css?v=5.3.5" />
+    <link rel="stylesheet" href="style.css?v=5.4.0" />
 </head>
 <body>
 
@@ -1164,16 +1164,19 @@
     <div class="modal-sheet sheet-wide" role="dialog" aria-label="File preview">
         <div class="sheet-handle"></div>
         <div class="modal-header">
-            <h3 class="ellipsis"><svg class="ic"><use href="#i-file"></use></svg> <span id="preview-name">file</span></h3>
+            <h3 class="ellipsis"><svg class="ic"><use href="#i-file"></use></svg> <span id="preview-name">file</span> <span class="pv-type-chip" id="preview-type">—</span></h3>
             <div class="drawer-header-actions">
+                <button class="icon-btn hidden" id="preview-edit-btn" data-action="preview-edit" title="Edit in editor"><svg class="ic"><use href="#i-edit"></use></svg></button>
+                <button class="icon-btn hidden" id="preview-zoom-btn" data-action="preview-zoom" title="Toggle zoom (fit / 1:1)"><svg class="ic"><use href="#i-search"></use></svg></button>
                 <button class="icon-btn" id="preview-download-btn" data-action="preview-download" title="Download"><svg class="ic"><use href="#i-download"></use></svg></button>
                 <button class="icon-btn" data-action="preview-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
             </div>
         </div>
-        <div class="modal-body preview-body">
+        <div class="modal-body preview-body" id="preview-body">
             <img id="preview-image" class="preview-image hidden" alt="Image preview" />
             <pre id="preview-content" class="preview-content"></pre>
         </div>
+        <div class="modal-footer pv-footer"><span id="preview-meta" class="setting-subtitle ellipsis">—</span></div>
     </div>
 </div>
 
@@ -1446,7 +1449,11 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
-<script src="app.js?v=5.3.5"></script>
-<script src="ui.js?v=5.3.5"></script>
+<script src="app.js?v=5.4.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.3/dist/docx-preview.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docx-preview@0.3.3/dist/docx-preview.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+<script src="ui.js?v=5.4.0"></script>
 </body>
 </html>

@@ -1330,6 +1330,38 @@ function visible(win, id) {
     ev(win, `rdSetKb(false); rdTeardown(); toggleRd();`);
     check('rd teardown resets UI', ev(win, `document.getElementById('rd-drawer').classList.contains('hidden') && document.getElementById('rd-connect-btn').classList.contains('hidden') === false`));
 
+
+    /* ── 5.4: universal Preview Studio ── */
+    console.log('── 5.4: preview studio kinds ──');
+    await ev(win, `api('/api/files/write', { method: 'POST', body: { path: 'gk-pv.md', content: '# Title\\n\\nSome **bold** and a list:\\n- a\\n- b\\n' } })`);
+    await ev(win, `openPreviewStudio('gk-pv.md')`);
+    await tick(500);
+    check('markdown renders h1/strong/list', ev(win, `!!document.querySelector('#preview-body .pv-md h1') && !!document.querySelector('#preview-body .pv-md strong') && document.querySelectorAll('#preview-body .pv-md li').length === 2`));
+    check('type chip + edit button for markdown', ev(win, `document.getElementById('preview-type').textContent`) === 'MARKDOWN' && ev(win, `!document.getElementById('preview-edit-btn').classList.contains('hidden')`));
+    await ev(win, `api('/api/files/write', { method: 'POST', body: { path: 'gk-pv.json', content: '{"a":1,"b":[true,null],"c":"x"}' } })`);
+    await ev(win, `openPreviewStudio('gk-pv.json')`);
+    await tick(500);
+    check('json pretty-printed + key highlighting', ev(win, `document.querySelectorAll('#preview-content .pv-jk').length >= 3`));
+    await ev(win, `api('/api/files/write', { method: 'POST', body: { path: 'gk-pv.csv', content: 'name,qty\\napple,2\\npear,5\\n' } })`);
+    await ev(win, `openPreviewStudio('gk-pv.csv')`);
+    await tick(500);
+    check('csv renders header + rows table', ev(win, `document.querySelectorAll('#preview-body .pv-table th').length === 2 && document.querySelectorAll('#preview-body .pv-table tr').length === 3`));
+    await ev(win, `api('/api/files/write', { method: 'POST', body: { path: 'gk-pv.bin', content: 'A\\u0000B\\u0001C' } })`);
+    await ev(win, `openPreviewStudio('gk-pv.bin')`);
+    await tick(700);
+    check('unknown binary → hex dump fallback', ev(win, `document.getElementById('preview-content').textContent.includes('41 00 42 01 43')`));
+    check('binary chip + no edit button', ev(win, `document.getElementById('preview-type').textContent`) === 'BINARY' && ev(win, `document.getElementById('preview-edit-btn').classList.contains('hidden')`));
+    await ev(win, `openPreviewStudio('public/icons/icon-192.png')`);
+    await tick(400);
+    check('image kind → img src + zoom button', ev(win, `document.getElementById('preview-image').src.includes('/download?path=') && !document.getElementById('preview-zoom-btn').classList.contains('hidden')`));
+    await ev(win, `openPreviewStudio('test/fixtures/voice-sample.mp3')`);
+    await tick(400);
+    check('audio kind → <audio controls>', ev(win, `(() => { const a = document.querySelector('#preview-body audio'); return !!a && a.controls && a.src.includes('/download?path='); })()`));
+    await ev(win, `closePreview()`);
+    await tick(200);
+    check('close clears dynamic studio nodes', ev(win, `document.querySelectorAll('#preview-body .pv-dyn').length === 0 && document.getElementById('preview-modal').classList.contains('hidden')`));
+    await ev(win, `['gk-pv.md','gk-pv.json','gk-pv.csv','gk-pv.bin'].forEach((f) => api('/api/files/delete', { method: 'POST', body: { path: f } }).catch(() => {}))`);
+
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
     const relevant = fatalErrors.filter((e) => !/Could not load|favicon|Not implemented|blob:fake/i.test(e));

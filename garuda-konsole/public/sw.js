@@ -3,16 +3,16 @@
    notifications even with the browser fully closed. */
 'use strict';
 
-const CACHE = 'garuda-konsole-v5.3.5';
+const CACHE = 'garuda-konsole-v5.4.0';
 const SHELL = [
     '/',
     '/index.html',
     /* Versioned asset URLs: a stale service worker from an older release can
        never have these in cache, so the first load after a deploy fetches the
        fresh CSS/JS from the network instead of resurrecting old styles. */
-    '/style.css?v=5.3.5',
-    '/app.js?v=5.3.5',
-    '/ui.js?v=5.3.5',
+    '/style.css?v=5.4.0',
+    '/app.js?v=5.4.0',
+    '/ui.js?v=5.4.0',
     '/manifest.webmanifest',
     '/replay.html',
     '/icons/icon.svg',
@@ -23,7 +23,11 @@ const SHELL = [
     'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js',
     'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js',
     'https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js',
-    'https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js'
+    'https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js',
+    'https://cdn.jsdelivr.net/npm/docx-preview@0.3.3/dist/docx-preview.min.js',
+    'https://cdn.jsdelivr.net/npm/docx-preview@0.3.3/dist/docx-preview.min.css',
+    'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+    'https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js'
 ];
 
 self.addEventListener('install', (event) => {

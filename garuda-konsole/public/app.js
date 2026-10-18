@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.3.5';
+const APP_VERSION = '5.4.0';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',

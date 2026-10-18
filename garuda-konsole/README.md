@@ -1,8 +1,8 @@
-# Garuda Konsole 5.3.5 🦅
+# Garuda Konsole 5.4.0 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.3.5-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-460%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.4.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-469%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,18 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 👁️ What's new in 5.4.0 — Preview Studio: every openable file, in the page
+
+Click any file (or its row) and the **Preview Studio** modal renders it — no more "binary file, download it":
+
+- **Images** png/jpg/gif/webp/svg/bmp/ico/avif — fit-to-view with a 1:1 zoom toggle
+- **Audio** mp3/wav/ogg/flac/m4a/aac/opus — native player · **Video** mp4/webm/ogv/mov/m4v (+ graceful codec-fallback note for mkv/avi)
+- **PDF** in-frame · **HTML** in a script-less sandboxed iframe · **Markdown** rendered (headings/lists/code/links) · **JSON** pretty-printed + syntax-tinted · **CSV/TSV** sticky-header tables (800-row cap)
+- **DOCX** via docx-preview · **XLSX/XLS/ODS** via SheetJS with a sheet selector · **ZIP** listings via fflate with in-archive text/image peek · **FONTS** ttf/otf/woff specimen via FontFace
+- **Text/code** of any extension with line-accurate rendering + one-tap **Edit** (the 5.2 editor) · **unknown binaries → hex dump** (64 KB) so *nothing* is unopenable
+- Header shows a type chip + Edit/Zoom/Download; footer shows size · mtime · path. CDN renderers are SW-cached for offline; every renderer degrades to a clear note + Download when its lib/codec is unavailable.
+- **Layout contract:** desktop = centered 980px sheet; ≤768px = true fullscreen; header/body/footer are a strict column with internal scrolling — verified 24/24 in Chromium at 1280×860 and 390×844 (in-viewport, zero overlap, zero horizontal overflow) via `tools/verify-preview.js`.
 
 ## 🖥️ What's new in 5.3.5 — portal fallback with remember-once approval
 

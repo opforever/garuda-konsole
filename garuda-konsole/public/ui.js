@@ -782,30 +782,349 @@ async function actionFilesMkdir() {
     }
 }
 
-async function previewFile(path) {
+/* ─────────────── 5.4: universal Preview Studio ───────────────
+   One modal, every openable type: images, audio, video, pdf, markdown,
+   json, csv/tsv tables, sandboxed html, docx (docx-preview), xlsx/xls/ods
+   (SheetJS), zip listings (fflate), font specimens, text/code with line
+   numbers, and a hex dump as the universal binary fallback.
+   Mobile: the sheet goes fullscreen; body scrolls internally; header and
+   footer are fixed rows — nothing overlaps (column flex, min-height:0). */
+const PV_EXT = {
+    image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'],
+    audio: ['mp3', 'wav', 'ogg', 'oga', 'flac', 'm4a', 'aac', 'opus'],
+    video: ['mp4', 'webm', 'ogv', 'ogg', 'mov', 'm4v', 'mkv', 'avi'],
+    pdf: ['pdf'],
+    md: ['md', 'markdown', 'mdown'],
+    json: ['json', 'jsonl', 'ndjson'],
+    csv: ['csv', 'tsv'],
+    html: ['html', 'htm', 'xhtml'],
+    docx: ['docx'],
+    sheet: ['xlsx', 'xls', 'ods'],
+    zip: ['zip'],
+    font: ['ttf', 'otf', 'woff', 'woff2']
+};
+function pvKind(path) {
+    const ext = (path.split('.').pop() || '').toLowerCase();
+    for (const k of Object.keys(PV_EXT)) if (PV_EXT[k].includes(ext)) return k;
+    return 'probe'; // unknown → text probe → hex fallback
+}
+function pvAuthUrl(path) { return `/download?path=${encodeURIComponent(path)}&auth=${encodeURIComponent(token || '')}`; }
+function pvDyn(tag, cls) { const n = el(tag, 'pv-dyn ' + (cls || '')); $('preview-body').appendChild(n); return n; }
+function pvClearBody() {
+    const img = $('preview-image'); const pre = $('preview-content');
+    if (img) { img.classList.add('hidden'); img.removeAttribute('src'); img.classList.remove('pv-zoomed'); }
+    if (pre) { pre.classList.add('hidden'); pre.textContent = ''; }
+    const body = $('preview-body');
+    if (body) body.querySelectorAll('.pv-dyn').forEach((n) => n.remove());
+    const zb = $('preview-zoom-btn'); if (zb) zb.classList.add('hidden');
+    const ed = $('preview-edit-btn'); if (ed) ed.classList.add('hidden');
+}
+function pvHeader(kind, editable) {
+    const chip = $('preview-type'); if (chip) chip.textContent = String(kind).toUpperCase();
+    const ed = $('preview-edit-btn'); if (ed) ed.classList.toggle('hidden', !editable);
+}
+function pvMeta(path, size, mtime, extra) {
+    const m = $('preview-meta');
+    if (!m) return;
+    const parts = [];
+    if (size != null && !isNaN(size)) parts.push(fmtBytes(size));
+    if (mtime) parts.push(new Date(mtime).toLocaleString());
+    if (extra) parts.push(extra);
+    parts.push(path);
+    m.textContent = parts.join(' · ');
+    m.title = path;
+}
+function pvNote(text, icon) {
+    const d = pvDyn('div', 'pv-note');
+    d.innerHTML = `<svg class="ic"><use href="${icon || '#i-info'}"></use></svg><span></span>`;
+    d.querySelector('span').textContent = text;
+    return d;
+}
+function mdToHtml(src) {
+    let h = escHtml(src);
+    h = h.replace(/```([\s\S]*?)```/g, (m, c) => `<pre class="pv-code">${c}</pre>`);
+    h = h.replace(/^######\s+(.*)$/gm, '<h6>$1</h6>').replace(/^#####\s+(.*)$/gm, '<h5>$1</h5>')
+         .replace(/^####\s+(.*)$/gm, '<h4>$1</h4>').replace(/^###\s+(.*)$/gm, '<h3>$1</h3>')
+         .replace(/^##\s+(.*)$/gm, '<h2>$1</h2>').replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
+    h = h.replace(/^\s*[-*]\s+(.*)$/gm, '<li>$1</li>');
+    h = h.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, '<ul>$1</ul>');
+    h = h.replace(/^&gt;\s?(.*)$/gm, '<blockquote>$1</blockquote>');
+    h = h.replace(/^(-{3,}|_{3,})$/gm, '<hr/>');
+    h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    h = h.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    h = h.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    h = h.replace(/\n{2,}/g, '</p><p>');
+    return '<p>' + h + '</p>';
+}
+function csvParse(text, sep) {
+    const rows = []; let row = []; let cur = ''; let q = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (q) {
+            if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+            else cur += c;
+        } else if (c === '"') q = true;
+        else if (c === sep) { row.push(cur); cur = ''; }
+        else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+        else if (c !== '\r') cur += c;
+    }
+    row.push(cur); rows.push(row);
+    return rows.filter((r) => r.length > 1 || (r.length === 1 && r[0] !== ''));
+}
+function jsonHighlight(src) {
+    const h = escHtml(src);
+    return h.replace(/(&quot;(?:[^&\\]|\\.)*&quot;)(\s*:)?|\b(true|false|null)\b|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g,
+        (m, str, colon, kw) => {
+            if (str) return colon ? `<span class="pv-jk">${str}</span>${colon}` : `<span class="pv-js">${str}</span>`;
+            if (kw) return `<span class="pv-jb">${kw}</span>`;
+            return `<span class="pv-jn">${m}</span>`;
+        });
+}
+function pvRenderText(content, truncated) {
+    const pre = $('preview-content');
+    pre.classList.remove('hidden');
+    pre.innerHTML = '';
+    const code = document.createElement('code');
+    code.textContent = (content || '(empty file)') + (truncated ? '\n\n… truncated at 512 KB …' : '');
+    pre.appendChild(code);
+}
+function pvRenderHex(buf) {
+    const pre = $('preview-content');
+    pre.classList.remove('hidden');
+    const u8 = new Uint8Array(buf);
+    const lines = [];
+    for (let off = 0; off < u8.length; off += 16) {
+        const slice = u8.subarray(off, Math.min(off + 16, u8.length));
+        const hex = Array.from(slice).map((b) => b.toString(16).padStart(2, '0')).join(' ');
+        const asc = Array.from(slice).map((b) => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.').join('');
+        lines.push(off.toString(16).padStart(8, '0') + '  ' + hex.padEnd(47) + '  |' + asc + '|');
+    }
+    pre.textContent = lines.join('\n') + (u8.length >= 65536 ? '\n\n… hex view capped at 64 KB …' : '');
+}
+async function pvFetchBytes(path, cap) {
+    const res = await fetch(pvAuthUrl(path), { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+    if (!res.ok) throw new Error('fetch failed ' + res.status);
+    if (cap) {
+        const reader = res.body ? res.body.getReader() : null;
+        if (reader) {
+            const chunks = []; let n = 0;
+            for (;;) { const r = await reader.read(); if (r.done) break; chunks.push(r.value); n += r.value.length; if (n >= cap) break; }
+            const out = new Uint8Array(Math.min(n, cap)); let o = 0;
+            for (const c of chunks) { out.set(c.subarray(0, Math.min(c.length, out.length - o)), o); o += Math.min(c.length, out.length - o); if (o >= cap) break; }
+            return out.buffer;
+        }
+    }
+    const ab = await res.arrayBuffer();
+    return cap ? ab.slice(0, cap) : ab;
+}
+async function openPreviewStudio(path, entryOpt) {
     const modal = $('preview-modal');
-    const content = $('preview-content');
-    const nameEl = $('preview-name');
-    if (!modal || !content) return;
+    if (!modal) return;
     previewPath = path;
-    nameEl.textContent = path.split('/').pop() || path;
+    const nameEl = $('preview-name');
+    if (nameEl) nameEl.textContent = path.split('/').pop() || path;
     setPreviewDownloadVisible(true);
-    const imgEl = $('preview-image');
-    if (imgEl) imgEl.classList.add('hidden');
-    content.classList.remove('hidden');
-    content.textContent = 'Loading…';
+    pvClearBody();
     modal.classList.remove('hidden');
+    const kind = pvKind(path);
+    let meta = entryOpt || null;
+    if (!meta || meta.size == null) { try { meta = await api('/api/files/stat?path=' + encodeURIComponent(path)); } catch (e) { meta = meta || {}; } }
+    pvMeta(path, meta && meta.size, meta && meta.mtime, kind !== 'probe' ? kind : '');
+    const url = pvAuthUrl(path);
+
+    if (kind === 'image') {
+        pvHeader('image', false);
+        const img = $('preview-image');
+        img.classList.remove('hidden');
+        img.src = url;
+        const zb = $('preview-zoom-btn'); if (zb) zb.classList.remove('hidden');
+        return;
+    }
+    if (kind === 'audio') {
+        pvHeader('audio', false);
+        const wrap = pvDyn('div', 'pv-media');
+        wrap.innerHTML = `<svg class="ic pv-media-ic"><use href="#i-chat"></use></svg>`;
+        const a = document.createElement('audio');
+        a.controls = true; a.src = url; a.className = 'pv-audio';
+        wrap.appendChild(a);
+        a.onerror = () => pvNote('This browser cannot decode this audio codec — use Download.', '#i-alert');
+        return;
+    }
+    if (kind === 'video') {
+        pvHeader('video', false);
+        const v = document.createElement('video');
+        v.controls = true; v.playsInline = true; v.src = url; v.className = 'pv-dyn pv-video';
+        $('preview-body').appendChild(v);
+        v.onerror = () => pvNote('This browser cannot decode this container/codec (try mp4/webm) — use Download.', '#i-alert');
+        return;
+    }
+    if (kind === 'pdf') {
+        pvHeader('pdf', false);
+        const f = document.createElement('iframe');
+        f.className = 'pv-dyn pv-frame'; f.src = url + '#toolbar=1'; f.title = 'PDF preview';
+        $('preview-body').appendChild(f);
+        return;
+    }
+    if (kind === 'html') {
+        pvHeader('html', true);
+        const data = await api(`/api/files/content?path=${encodeURIComponent(path)}`).catch(() => null);
+        if (!data || data.binary) { pvNote('Cannot read this HTML file.'); return; }
+        const f = document.createElement('iframe');
+        f.className = 'pv-dyn pv-frame'; f.sandbox = ''; f.srcdoc = data.content || '';
+        $('preview-body').appendChild(f);
+        return;
+    }
+    if (kind === 'md') {
+        pvHeader('markdown', true);
+        const data = await api(`/api/files/content?path=${encodeURIComponent(path)}`).catch(() => null);
+        if (!data || data.binary) { pvNote('Cannot read this file as text.'); return; }
+        const d = pvDyn('div', 'pv-md');
+        d.innerHTML = mdToHtml(data.content || '');
+        return;
+    }
+    if (kind === 'json') {
+        pvHeader('json', true);
+        const data = await api(`/api/files/content?path=${encodeURIComponent(path)}`).catch(() => null);
+        if (!data || data.binary) { pvNote('Cannot read this file as text.'); return; }
+        let pretty = data.content || '';
+        try { pretty = JSON.stringify(JSON.parse(data.content), null, 2); } catch (e) {}
+        const pre = $('preview-content');
+        pre.classList.remove('hidden');
+        pre.innerHTML = `<code>${jsonHighlight(pretty)}</code>`;
+        return;
+    }
+    if (kind === 'csv') {
+        pvHeader('csv', true);
+        const data = await api(`/api/files/content?path=${encodeURIComponent(path)}`).catch(() => null);
+        if (!data || data.binary) { pvNote('Cannot read this file as text.'); return; }
+        const rows = csvParse(data.content || '', path.toLowerCase().endsWith('.tsv') ? '\t' : ',').slice(0, 800);
+        const wrap = pvDyn('div', 'pv-tablewrap');
+        const t = document.createElement('table');
+        t.className = 'pv-table';
+        rows.forEach((r, i) => {
+            const tr = document.createElement('tr');
+            r.forEach((c) => {
+                const cell = document.createElement(i === 0 ? 'th' : 'td');
+                cell.textContent = c;
+                tr.appendChild(cell);
+            });
+            t.appendChild(tr);
+        });
+        wrap.appendChild(t);
+        if (rows.length >= 800) pvNote('Showing first 800 rows.');
+        return;
+    }
+    if (kind === 'docx') {
+        pvHeader('docx', false);
+        if (typeof window.docxPreview === 'undefined' && typeof window.docx === 'undefined') { pvNote('docx renderer not loaded (offline?) — use Download.', '#i-alert'); return; }
+        try {
+            const buf = await pvFetchBytes(path);
+            const host = pvDyn('div', 'pv-docx');
+            const lib = window.docxPreview || window.docx;
+            await lib.renderAsync(buf, host, {}, { inWrapper: false, ignoreWidth: false, breakPages: true });
+        } catch (e) { pvNote('docx render failed: ' + (e.message || e), '#i-alert'); }
+        return;
+    }
+    if (kind === 'sheet') {
+        pvHeader('sheet', false);
+        if (typeof window.XLSX === 'undefined') { pvNote('Spreadsheet renderer not loaded (offline?) — use Download.', '#i-alert'); return; }
+        try {
+            const buf = await pvFetchBytes(path);
+            const wb = window.XLSX.read(buf, { type: 'array' });
+            const bar = pvDyn('div', 'pv-sheetbar');
+            const sel = document.createElement('select');
+            sel.className = 'select-mini';
+            wb.SheetNames.forEach((n) => { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); });
+            bar.appendChild(sel);
+            const host = pvDyn('div', 'pv-tablewrap');
+            const draw = (name) => {
+                const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, blankrows: false }).slice(0, 800);
+                host.innerHTML = '';
+                const t = document.createElement('table'); t.className = 'pv-table';
+                rows.forEach((r, i) => {
+                    const tr = document.createElement('tr');
+                    (r || []).forEach((c) => { const cell = document.createElement(i === 0 ? 'th' : 'td'); cell.textContent = String(c == null ? '' : c); tr.appendChild(cell); });
+                    t.appendChild(tr);
+                });
+                host.appendChild(t);
+            };
+            sel.addEventListener('change', () => draw(sel.value));
+            draw(wb.SheetNames[0]);
+        } catch (e) { pvNote('Spreadsheet render failed: ' + (e.message || e), '#i-alert'); }
+        return;
+    }
+    if (kind === 'zip') {
+        pvHeader('zip', false);
+        if (typeof window.fflate === 'undefined') { pvNote('Zip renderer not loaded (offline?) — use Download.', '#i-alert'); return; }
+        try {
+            const buf = await pvFetchBytes(path);
+            const entries = await window.fflate.unzip(new Uint8Array(buf));
+            const list = pvDyn('div', 'pv-ziplist');
+            const names = Object.keys(entries).sort();
+            names.slice(0, 400).forEach((n) => {
+                const row = document.createElement('div');
+                row.className = 'pv-ziprow';
+                const bytes = entries[n].length;
+                row.innerHTML = `<span class="pv-zipname"></span><span class="pv-zipsize">${fmtBytes(bytes)}</span>`;
+                row.querySelector('.pv-zipname').textContent = n;
+                const ext = (n.split('.').pop() || '').toLowerCase();
+                if (bytes < 2 * 1024 * 1024 && (PV_EXT.image.includes(ext) || ext === 'txt' || ext === 'md' || ext === 'json' || ext === 'csv' || ext === 'log')) {
+                    row.classList.add('clickable');
+                    row.addEventListener('click', () => {
+                        const inner = list.querySelector('.pv-zipinner');
+                        inner.innerHTML = '';
+                        if (PV_EXT.image.includes(ext)) {
+                            const blob = new Blob([entries[n]], { type: 'image/' + (ext === 'svg' ? 'svg+xml' : ext === 'jpg' ? 'jpeg' : ext) });
+                            const im = document.createElement('img'); im.className = 'pv-zipimg'; im.src = URL.createObjectURL(blob); inner.appendChild(im);
+                        } else {
+                            const pre = document.createElement('pre'); pre.className = 'pv-zippre';
+                            pre.textContent = new TextDecoder().decode(entries[n]).slice(0, 200000);
+                            inner.appendChild(pre);
+                        }
+                    });
+                }
+                list.appendChild(row);
+            });
+            const inner = document.createElement('div');
+            inner.className = 'pv-zipinner';
+            list.appendChild(inner);
+            if (names.length > 400) pvNote('Showing first 400 entries.');
+        } catch (e) { pvNote('Zip parse failed: ' + (e.message || e), '#i-alert'); }
+        return;
+    }
+    if (kind === 'font') {
+        pvHeader('font', false);
+        try {
+            const buf = await pvFetchBytes(path);
+            const face = new FontFace('pv-font-' + Date.now(), buf);
+            await face.load();
+            const d = pvDyn('div', 'pv-font');
+            d.style.fontFamily = `"${face.family}"`;
+            d.innerHTML = '<div class="pv-font-lg">The quick brown fox jumps over the lazy dog 0123456789</div><div class="pv-font-sm">ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz !?@#&*()[]{}<>/*-+=$€£¥</div>';
+        } catch (e) { pvNote('Font could not be parsed by this browser.', '#i-alert'); }
+        return;
+    }
+
+    /* probe: text → rendered text/code; binary → hex dump */
+    pvHeader('file', true);
     try {
         const data = await api(`/api/files/content?path=${encodeURIComponent(path)}`);
-        if (data.binary) {
-            content.textContent = `Binary file — ${fmtBytes(data.size)}.\n\nPreview is only available for text files.\nUse the download button to save it.`;
-        } else {
-            content.textContent = (data.content || '(empty file)') + (data.truncated ? '\n\n… truncated at 512 KB …' : '');
+        if (!data.binary) {
+            pvHeader((path.split('.').pop() || 'txt').toUpperCase().slice(0, 8), true);
+            pvRenderText(data.content, data.truncated);
+            return;
         }
+        pvHeader('binary', false);
+        const buf = await pvFetchBytes(path, 65536);
+        pvRenderHex(buf);
+        pvNote('Binary file — showing hex view. Use Download for the full file.');
     } catch (err) {
-        content.textContent = 'Preview failed: ' + (err.message || 'unknown error');
+        pvHeader('error', false);
+        pvNote('Preview failed: ' + (err.message || 'unknown error'), '#i-alert');
     }
 }
+async function previewFile(path) { return openPreviewStudio(path); }
 
 function setPreviewDownloadVisible(on) {
     const dl = $('preview-download-btn');
@@ -815,6 +1134,7 @@ function setPreviewDownloadVisible(on) {
 function closePreview() {
     const modal = $('preview-modal');
     if (modal) modal.classList.add('hidden');
+    if (typeof pvClearBody === 'function') pvClearBody();
     previewPath = null;
     stopTaskLogPoll();
     setPreviewDownloadVisible(true);
@@ -1997,6 +2317,8 @@ const ACTIONS = {
     'confirm-cancel': () => resolveConfirmCancel(),
     'preview-close': () => closePreview(),
     'preview-download': () => downloadPreviewFile(),
+    'preview-edit': () => { const p = previewPath; closePreview(); if (p) openEditor(p); },
+    'preview-zoom': () => { const img = $('preview-image'); if (img) img.classList.toggle('pv-zoomed'); },
     'kb-expand': () => expandKeyboard(),
     'search': () => { closeMobileMore(); openSearch(); },
     'search-case': () => toggleSearchCase(),
@@ -3460,25 +3782,7 @@ async function actionFileDetails(node) {
 /* image preview support */
 const IMG_EXT_UI = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif']);
 
-async function previewFileSmart(path) {
-    const ext = (path.split('.').pop() || '').toLowerCase();
-    if (IMG_EXT_UI.has(ext)) {
-        const modal = $('preview-modal');
-        const content = $('preview-content');
-        const img = $('preview-image');
-        const nameEl = $('preview-name');
-        if (!modal || !img) return previewFile(path);
-        previewPath = path;
-        nameEl.textContent = path.split('/').pop() || path;
-        setPreviewDownloadVisible(true);
-        content.classList.add('hidden');
-        img.classList.remove('hidden');
-        img.src = `/download?path=${encodeURIComponent(path)}&auth=${encodeURIComponent(token || '')}`;
-        modal.classList.remove('hidden');
-        return;
-    }
-    return previewFile(path);
-}
+async function previewFileSmart(path, entryOpt) { return openPreviewStudio(path, entryOpt); }
 
 
 /* ═══════════════════════ 3.1: AI GUIDE UI ═══════════════════════ */

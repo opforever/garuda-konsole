@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.3.5';
+const VERSION = '5.4.0';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
