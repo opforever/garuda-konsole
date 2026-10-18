@@ -1,8 +1,8 @@
-# Garuda Konsole 5.2.0 🦅
+# Garuda Konsole 5.2.1 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.2.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-433%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.2.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-443%20passing-2fd07a)
 
 ---
 
@@ -210,6 +210,15 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🩹 What's new in 5.2.1 — replays keep their colors, recordings get a library
+
+Real-world bug reports: *"the shared url has no colors"* · *"feels broken… those full ghosts in the json"* · *"why is there no saves? recordings should be saved in ~/Rec_jsonl"*.
+
+- **The public replay player is now a real (minimal) VT emulator.** v5.2.0 stripped ANSI escapes, which (a) deleted all colors and (b) garbled any line where the shell moved the cursor — e.g. **fish's autosuggestion "ghost" text** (`ESC[90m…` + cursor jumps) got flattened into duplicated junk. The player now emulates cursor moves, CR/BS overwrites, erase sequences and **full SGR color** (16 / 256 / truecolor, bold/dim/underline), so shared replays look like your terminal — ghosts included, dim and in place, exactly as fish drew them. Verified against a real user export (40 frames of fish prompt + errors): colored spans render, prompt lines clean.
+- **Recordings are persisted server-side in `~/Rec_jsonl`** (override with `GK_REC_DIR`). Stopping a recording auto-saves it (atomic jsonl with header, 20 MB cap; toggle in Settings → "Auto-save recordings"). Palette gained a **Recordings** section: *Play recording: …* opens it straight in the replay modal, *Delete recording: …* removes the file. REST: `POST/GET/DELETE /api/recordings[/:name]` with strict name validation (no traversal).
+
+Guards: static-check now also fails if the player loses its SGR emulator or the recordings routes disappear. Suite: **API 178, frontend 265**, Chromium feature verify 12/12. Version lockstep 5.2.1.
 
 ## 🚀 What's new in 5.2.0 — five requested features, one release
 

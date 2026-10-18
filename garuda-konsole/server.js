@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.2.0';
+const VERSION = '5.2.1';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -950,6 +950,82 @@ app.get('/api/replay/:token', (req, res) => {
     const share = replayShares.get(req.params.token);
     if (!share || Date.now() - share.createdAt > REPLAY_TTL_MS) return res.status(404).json({ error: 'Replay not found or expired' });
     res.json({ title: share.title, createdAt: share.createdAt, events: share.events });
+});
+
+/* ─────────────── 5.2.1: persistent recording library (~/Rec_jsonl) ─────────────── */
+
+const REC_DIR = path.resolve(process.env.GK_REC_DIR || path.join(os.homedir(), 'Rec_jsonl'));
+const REC_NAME_RE = /^garuda-replay-[\w.-]+\.jsonl$/;
+function ensureRecDir() {
+    try { fs.mkdirSync(REC_DIR, { recursive: true }); return true; } catch (e) { return false; }
+}
+
+app.post('/api/recordings', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const chunks = Array.isArray(body.chunks) ? body.chunks : null;
+    if (!chunks || !chunks.length) return res.status(400).json({ error: 'chunks are required' });
+    let bytes = 0;
+    for (const c of chunks) {
+        if (!c || typeof c.t !== 'number' || typeof c.d !== 'string') return res.status(400).json({ error: 'bad chunk shape' });
+        bytes += c.d.length;
+        if (bytes > 20 * 1024 * 1024) return res.status(413).json({ error: 'recording too large (20 MB cap)' });
+    }
+    if (!ensureRecDir()) return res.status(500).json({ error: 'cannot create ' + REC_DIR });
+    const name = 'garuda-replay-' + new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomBytes(2).toString('hex') + '.jsonl';
+    const header = { app: 'garuda-konsole', version: VERSION, title: String(body.title || 'recording').slice(0, 120), frames: chunks.length };
+    const lines = [JSON.stringify(header)];
+    for (const c of chunks) lines.push(JSON.stringify({ t: c.t, d: c.d }));
+    try {
+        fs.writeFileSync(path.join(REC_DIR, name), lines.join('\n') + '\n', 'utf8');
+    } catch (e) {
+        return res.status(500).json({ error: 'write failed' });
+    }
+    res.json({ success: true, name, dir: REC_DIR, bytes });
+});
+
+app.get('/api/recordings', requireAuth, (req, res) => {
+    if (!ensureRecDir()) return res.json({ recordings: [], dir: REC_DIR });
+    const out = [];
+    for (const f of fs.readdirSync(REC_DIR)) {
+        if (!REC_NAME_RE.test(f)) continue;
+        try {
+            const st = fs.statSync(path.join(REC_DIR, f));
+            out.push({ name: f, size: st.size, mtime: st.mtimeMs });
+        } catch (e) {}
+    }
+    out.sort((a, b) => b.mtime - a.mtime);
+    res.json({ recordings: out.slice(0, 100), dir: REC_DIR });
+});
+
+app.get('/api/recordings/:name', requireAuth, (req, res) => {
+    if (!REC_NAME_RE.test(req.params.name)) return res.status(400).json({ error: 'invalid recording name' });
+    const abs = path.join(REC_DIR, req.params.name);
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return res.status(404).json({ error: 'not found' });
+    try {
+        const lines = fs.readFileSync(abs, 'utf8').split('\n').filter(Boolean);
+        let header = null, start = 0;
+        try {
+            const h = JSON.parse(lines[0]);
+            if (h && h.app === 'garuda-konsole') { header = h; start = 1; }
+        } catch (e) {}
+        const chunks = lines.slice(start)
+            .map((l) => { try { return JSON.parse(l); } catch (e) { return null; } })
+            .filter((c) => c && typeof c.t === 'number' && typeof c.d === 'string')
+            .map((c) => ({ t: c.t, d: c.d }));
+        res.json({ title: (header && header.title) || req.params.name, chunks });
+    } catch (e) {
+        res.status(500).json({ error: 'read failed' });
+    }
+});
+
+app.delete('/api/recordings/:name', requireAuth, (req, res) => {
+    if (!REC_NAME_RE.test(req.params.name)) return res.status(400).json({ error: 'invalid recording name' });
+    try {
+        fs.unlinkSync(path.join(REC_DIR, req.params.name));
+        res.json({ success: true });
+    } catch (e) {
+        res.status(404).json({ error: 'not found' });
+    }
 });
 
 /* ──────────────────────────── REST: shells & git ──────────────────────────── */

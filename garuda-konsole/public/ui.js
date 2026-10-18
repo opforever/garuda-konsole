@@ -891,6 +891,11 @@ function buildPaletteItems(query) {
     for (const r of getRecentCommands().slice(0, 40)) pushScored({ sec: 'Recent', icon: '#i-clock', title: r, sub: 'run again', kw: r, run: () => { runCommandInActiveTab(r); closePalette(); } }, r);
     /* 5.2: saved workspace layouts */
     pushScored({ sec: 'Layouts', icon: '#i-save', title: 'Save current layout…', sub: 'tabs + splits + colors', kw: 'layout save workspace snapshot arrange', run: () => { closePalette(); saveCurrentLayoutPrompt(); } }, 'save layout workspace snapshot');
+    for (const r of recordingsCache.slice(0, 12)) {
+        const rn = r.name.replace(/^garuda-replay-/, '').replace(/\.jsonl$/, '');
+        pushScored({ sec: 'Recordings', icon: '#i-record', title: 'Play recording: ' + rn, sub: Math.round(r.size / 1024) + ' KB · saved', kw: 'recording replay open saved jsonl', run: () => { closePalette(); openSavedRecording(r.name); } }, 'play recording replay open ' + r.name);
+        pushScored({ sec: 'Recordings', icon: '#i-trash', title: 'Delete recording: ' + rn, sub: 'remove from ~/Rec_jsonl', kw: 'recording delete remove', run: () => { closePalette(); deleteRecording(r.name); } }, 'delete recording ' + r.name);
+    }
     for (const l of layoutsCache) {
         pushScored({ sec: 'Layouts', icon: '#i-split', title: 'Restore layout: ' + l.name, sub: `${l.tabs.length} tab(s)${l.split ? ' + split' : ''}`, kw: 'layout restore workspace', run: () => { closePalette(); restoreLayout(l); } }, 'restore layout ' + l.name);
         pushScored({ sec: 'Layouts', icon: '#i-trash', title: 'Delete layout: ' + l.name, sub: 'remove saved snapshot', kw: 'layout delete remove', run: () => { closePalette(); deleteLayout(l.id); } }, 'delete layout ' + l.name);
@@ -901,14 +906,14 @@ function buildPaletteItems(query) {
     }
 
     out.sort((a, b) => b.score - a.score);
-    const SEC_ORDER = { Actions: 0, Macros: 1, Recent: 2, Themes: 3, Layouts: 4 };
+    const SEC_ORDER = { Actions: 0, Macros: 1, Recent: 2, Themes: 3, Layouts: 4, Recordings: 5 };
     let limited = q ? out.slice(0, 42) : limitNoQuery(out);
     limited.sort((a, b) => (SEC_ORDER[a.item.sec] - SEC_ORDER[b.item.sec]) || (b.score - a.score));
     return limited.map((o) => o.item);
 }
 
 function limitNoQuery(scored) {
-    const caps = { Actions: 99, Macros: 5, Recent: 6, Themes: 0, Layouts: 10 };
+    const caps = { Actions: 99, Macros: 5, Recent: 6, Themes: 0, Layouts: 10, Recordings: 12 };
     const counts = {};
     return scored.filter((o) => {
         const c = counts[o.item.sec] || 0;
@@ -980,6 +985,7 @@ function togglePalette() {
 
 function openPalette() {
     if (typeof refreshLayoutsCache === 'function') refreshLayoutsCache();
+    if (typeof refreshRecordingsCache === 'function') refreshRecordingsCache();
     const ov = $('palette-overlay');
     const input = $('palette-input');
     if (!ov || !input) return;
@@ -1368,6 +1374,7 @@ function syncSettingsUI() {
     chk('setting-haptics', s.haptics);
     chk('setting-completion-notif', s.completionNotifications);
     chk('setting-health-push', !!s.healthPush);
+    chk('setting-auto-save-rec', s.autoSaveRecordings !== false);
     chk('setting-boot-anim', s.bootAnim);
     chk('setting-reduced-motion', s.reducedMotion);
     set('setting-scroll-speed', s.scrollSpeed);
@@ -2259,6 +2266,7 @@ function wireUIEvents() {
     bindChange('setting-completion-notif', (n) => {
         saveSettings({ completionNotifications: n.checked });
     bindChange('setting-health-push', (n) => { saveSettings({ healthPush: n.checked }); });
+    bindChange('setting-auto-save-rec', (n) => { saveSettings({ autoSaveRecordings: n.checked }); });
         if (n.checked && 'Notification' in window && Notification.permission !== 'granted') {
             Notification.requestPermission().catch(() => {});
         }
@@ -4925,4 +4933,25 @@ function downloadReplayCast() {
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 400);
     showToast({ type: 'success', title: 'asciicast exported', text: a.download });
+}
+
+/* ── 5.2.1: saved recording library (server-side ~/Rec_jsonl) ── */
+let recordingsCache = [];
+async function refreshRecordingsCache() {
+    try { recordingsCache = (await api('/api/recordings')).recordings || []; } catch (e) { recordingsCache = []; }
+    return recordingsCache;
+}
+async function openSavedRecording(name) {
+    try {
+        const rec = await api('/api/recordings/' + encodeURIComponent(name));
+        if (!rec || !rec.chunks || !rec.chunks.length) { showToast({ type: 'warn', title: 'Empty recording' }); return; }
+        openReplay({ title: rec.title, chunks: rec.chunks, live: false });
+    } catch (e) { showToast({ type: 'error', title: 'Open failed', text: String(e.message || e) }); }
+}
+async function deleteRecording(name) {
+    try {
+        await api('/api/recordings/' + encodeURIComponent(name), { method: 'DELETE' });
+        await refreshRecordingsCache();
+        showToast({ type: 'success', title: 'Recording deleted', duration: 1500, silent: true });
+    } catch (e) { showToast({ type: 'error', title: 'Delete failed', text: String(e.message || e) }); }
 }

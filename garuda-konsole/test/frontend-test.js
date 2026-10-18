@@ -1289,6 +1289,30 @@ function visible(win, id) {
     const shareUrl52 = await ev(win, `api('/api/replay/share', { method: 'POST', body: { title: 'fe replay', events: [{ t: 0, d: 'x' }] } }).then((r) => r.url)`);
     check('share returns a public player url', typeof shareUrl52 === 'string' && shareUrl52.indexOf('/replay.html?r=replay_') === 0);
 
+
+    /* ── 5.2.1: recording auto-save + palette + player open ── */
+    console.log('── 5.2.1: recordings auto-save to ~/Rec_jsonl ──');
+    const recTab521 = ev(win, `Object.keys(tabs)[0]`);
+    ev(win, `startRecording(${JSON.stringify(recTab521)})`);
+    ev(win, `recordChunk(tabs[${JSON.stringify(recTab521)}], 'hello rec\\r\\n')`);
+    ev(win, `recordChunk(tabs[${JSON.stringify(recTab521)}], 'second line\\r\\n')`);
+    await ev(win, `stopRecording(${JSON.stringify(recTab521)})`);
+    await tick(800);
+    const recList521 = await ev(win, `api('/api/recordings').then((d) => d.recordings)`);
+    check('stopping a recording auto-saves server-side', Array.isArray(recList521) && recList521.length >= 1, JSON.stringify(recList521 || []).slice(0, 80));
+    const recName521 = recList521 && recList521[0] ? recList521[0].name : null;
+    check('palette offers play + delete entries', !!recName521 &&
+        ev(win, `buildPaletteItems('play recording').some((i) => /Play recording:/.test(i.title))`) &&
+        ev(win, `buildPaletteItems('delete recording').some((i) => /Delete recording:/.test(i.title))`));
+    await ev(win, `openSavedRecording(${JSON.stringify(recName521)})`);
+    await tick(500);
+    check('saved recording opens in the replay modal', ev(win, `!document.getElementById('replay-modal').classList.contains('hidden')`));
+    await ev(win, `closeReplay()`);
+    await tick(200);
+    await ev(win, `deleteRecording(${JSON.stringify(recName521)})`);
+    await tick(300);
+    check('palette cache refreshes after delete', ev(win, `!recordingsCache.some((r) => r.name === ${JSON.stringify(recName521)})`));
+
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
     const relevant = fatalErrors.filter((e) => !/Could not load|favicon|Not implemented|blob:fake/i.test(e));

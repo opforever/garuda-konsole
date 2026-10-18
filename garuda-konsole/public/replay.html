@@ -14,7 +14,7 @@
         min-height: 100dvh; display: flex; flex-direction: column; align-items: center;
         padding: 22px 14px;
     }
-    .wrap { width: min(96vw, 980px); display: flex; flex-direction: column; gap: 12px; }
+    .wrap { width: min(96vw, 1060px); display: flex; flex-direction: column; gap: 12px; }
     header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     header h1 { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
     header .badge {
@@ -36,12 +36,13 @@
     input[type="range"] { flex: 1; min-width: 120px; accent-color: #3daee9; }
     select { background: #161b24; color: #e8edf4; border: 1px solid rgba(125, 145, 175, .3); border-radius: 8px; padding: 5px 7px; font: 12px inherit; }
     .time { font: 11px ui-monospace, Menlo, Consolas, monospace; color: #93a0b0; min-width: 92px; text-align: right; }
-    pre {
+    #screen {
         background: #080a0f; border: 1px solid rgba(125, 145, 175, .18); border-radius: 12px;
         padding: 14px 16px; min-height: 320px; max-height: 62dvh; overflow: auto;
         font: 12px/1.55 ui-monospace, 'Fira Code', Menlo, Consolas, monospace;
-        white-space: pre-wrap; word-break: break-word; color: #d5dbe5;
+        white-space: pre; color: #d5dbe5;
     }
+    #screen b { font-weight: 700; }
     .err { color: #ff5566; font-size: 13px; padding: 18px; text-align: center; }
     footer { font-size: 11px; color: #5d6a7a; text-align: center; }
     footer a { color: #3daee9; text-decoration: none; }
@@ -72,41 +73,186 @@
 </div>
 <script>
 'use strict';
-/* Minimal ANSI-stripped timeline player for Garuda Konsole replay shares.
-   Deliberately dependency-free: this page is public (the token IS the
-   capability) so it must not pull app code or CDNs. */
+/* Garuda Konsole public replay player.
+   Dependency-free on purpose (this page is public), but NOT naive: it runs a
+   minimal VT emulator so replays are faithful — cursor moves (←/→/CR/BS),
+   line overwrites, erase sequences and full SGR colors (16/256/truecolor).
+   That matters because shells like fish embed autosuggestion "ghost" text
+   with cursor jumps; stripping escapes (as v5.2.0 did) garbled those lines
+   and lost all color. */
 const token = new URLSearchParams(location.search).get('r') || '';
 const $ = (id) => document.getElementById(id);
 const screenEl = $('screen');
-let chunks = [], total = 0, idx = 0, playing = false, timer = null, buffer = '';
+let chunks = [], total = 0, idx = 0, playing = false, timer = null;
 
-function stripAnsi(s) {
-    return String(s)
-        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-        .replace(/\x1b[()][0-9A-B]/g, '')
-        .replace(/\x1b[=>]/g, '')
-        .replace(/\r/g, '');
+/* ── minimal terminal emulator ── */
+const COLS = 200, MAX_LINES = 4000;
+const BASE16 = ['#000000','#c2362b','#25a45c','#b8860b','#2b56c2','#8b46b8','#2aa198','#93a0b0',
+                '#5d6a7a','#ff5566','#2fd07a','#f6a609','#3daee9','#c678dd','#33c5ba','#d5dbe5'];
+function color256(n) {
+    if (n < 16) return BASE16[n];
+    if (n >= 232) { const v = 8 + (n - 232) * 10; return `rgb(${v},${v},${v})`; }
+    n -= 16;
+    const r = (n / 36) | 0, g = ((n / 6) | 0) % 6, b = n % 6;
+    const lv = (x) => (x ? 55 + x * 40 : 0);
+    return `rgb(${lv(r)},${lv(g)},${lv(b)})`;
 }
-function fmt(ms) {
-    const s = Math.max(0, Math.round(ms / 1000));
-    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+function Emu() {
+    this.lines = [[]];
+    this.r = 0; this.c = 0;
+    this.fg = null; this.bg = null; this.bold = false; this.dim = false; this.ul = false;
 }
+Emu.prototype.cell = function (r, c) {
+    while (this.lines.length <= r) this.lines.push([]);
+    const line = this.lines[r];
+    while (line.length <= c) line.push({ ch: ' ', fg: null, bg: null, b: 0, d: 0, u: 0 });
+    return line[c];
+};
+Emu.prototype.put = function (ch) {
+    if (this.c >= COLS) { this.c = 0; this.r++; }
+    const cell = this.cell(this.r, this.c);
+    cell.ch = ch; cell.fg = this.fg; cell.bg = this.bg;
+    cell.b = this.bold ? 1 : 0; cell.d = this.dim ? 1 : 0; cell.u = this.ul ? 1 : 0;
+    this.c++;
+};
+Emu.prototype.eraseLine = function (mode) {
+    const line = this.lines[this.r] || [];
+    if (mode === 2) line.length = 0;
+    else if (mode === 1) { for (let i = 0; i < this.c; i++) if (line[i]) line[i].ch = ' '; }
+    else { for (let i = this.c; i < line.length; i++) line[i].ch = ' '; }
+};
+Emu.prototype.eraseScreen = function (mode) {
+    if (mode === 2 || mode === 3) { this.lines = [[]]; this.r = 0; this.c = 0; return; }
+    this.lines.length = Math.min(this.lines.length, this.r + 1);
+    this.eraseLine(0);
+};
+Emu.prototype.sgr = function (params) {
+    let i = 0;
+    const p = params.length ? params : [0];
+    while (i < p.length) {
+        const n = p[i];
+        if (n === 0) { this.fg = null; this.bg = null; this.bold = this.dim = this.ul = false; }
+        else if (n === 1) this.bold = true;
+        else if (n === 2) this.dim = true;
+        else if (n === 4) this.ul = true;
+        else if (n === 22) { this.bold = false; this.dim = false; }
+        else if (n === 24) this.ul = false;
+        else if (n >= 30 && n <= 37) this.fg = BASE16[n - 30];
+        else if (n === 39) this.fg = null;
+        else if (n >= 40 && n <= 47) this.bg = BASE16[n - 40];
+        else if (n === 49) this.bg = null;
+        else if (n >= 90 && n <= 97) this.fg = BASE16[n - 90 + 8];
+        else if (n >= 100 && n <= 107) this.bg = BASE16[n - 100 + 8];
+        else if (n === 38 || n === 48) {
+            if (p[i + 1] === 5 && p[i + 2] != null) { const col = color256(p[i + 2] | 0); if (n === 38) this.fg = col; else this.bg = col; i += 2; }
+            else if (p[i + 1] === 2 && p[i + 4] != null) { const col = `rgb(${p[i + 2]},${p[i + 3]},${p[i + 4]})`; if (n === 38) this.fg = col; else this.bg = col; i += 4; }
+        }
+        i++;
+    }
+};
+Emu.prototype.feed = function (str) {
+    let i = 0;
+    const N = str.length;
+    while (i < N) {
+        const ch = str[i];
+        if (ch === '\x1b') {
+            if (str[i + 1] === ']') { // OSC → skip to BEL or ST
+                let j = i + 2;
+                while (j < N && str[j] !== '\x07' && !(str[j] === '\x1b' && str[j + 1] === '\\')) j++;
+                i = j + (str[j] === '\x1b' ? 2 : 1);
+                continue;
+            }
+            if (str[i + 1] === '[') { // CSI: params (digits, ;, private markers) then final byte
+                let j = i + 2;
+                while (j < N && (str[j] === ';' || str[j] === '?' || str[j] === '>' || str[j] === '!' || (str[j] >= '0' && str[j] <= '9'))) j++;
+                const final = str[j] || '';
+                const body = str.slice(i + 2, j);
+                const priv = /^[?>!]/.test(body);
+                const nums = body.replace(/^[?>!]/, '').split(';').map((x) => (x === '' ? 0 : (parseInt(x, 10) || 0)));
+                if (!priv && final) {
+                    const p1 = nums[0] || 1;
+                    if (final === 'm') this.sgr(nums);
+                    else if (final === 'A') this.r = Math.max(0, this.r - p1);
+                    else if (final === 'B') this.r = this.r + p1;
+                    else if (final === 'C') this.c = Math.min(COLS - 1, this.c + p1);
+                    else if (final === 'D') this.c = Math.max(0, this.c - p1);
+                    else if (final === 'G') this.c = Math.min(COLS - 1, p1 - 1);
+                    else if (final === 'K') this.eraseLine(nums[0] || 0);
+                    else if (final === 'J') this.eraseScreen(nums[0] || 0);
+                    else if (final === 'H' || final === 'f') { this.r = 0; this.c = 0; }
+                }
+                i = j + 1;
+                continue;
+            }
+            if (str[i + 1] === 'M' || str[i + 1] === 'P') { i += 2; continue; }
+            i += 2; // other 2-byte escapes (charset switches etc.)
+            continue;
+        }
+        if (ch === '\r') { this.c = 0; i++; continue; }
+        if (ch === '\n') { this.r++; this.c = 0; while (this.lines.length > MAX_LINES) this.lines.shift(); i++; continue; }
+        if (ch === '\b') { this.c = Math.max(0, this.c - 1); i++; continue; }
+        if (ch === '\t') { this.c = Math.min(COLS - 1, (Math.floor(this.c / 8) + 1) * 8); i++; continue; }
+        if (ch === '\x07' || ch === '\x00') { i++; continue; }
+        this.put(ch);
+        i++;
+    }
+    while (this.lines.length > MAX_LINES) this.lines.shift();
+};
+Emu.prototype.html = function () {
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const out = [];
+    for (const line of this.lines) {
+        let lineHtml = '';
+        let run = null;
+        const key = (c) => `${c.fg || ''}|${c.bg || ''}|${c.b}|${c.d}|${c.u}`;
+        for (const c of line) {
+            const k = key(c);
+            if (!run || run.k !== k) {
+                if (run) lineHtml += '</span>';
+                run = { k };
+                const [fg, bg, b, d, u] = k.split('|');
+                const st = [];
+                if (fg) st.push(`color:${fg}`);
+                if (bg) st.push(`background:${bg}`);
+                if (b === '1') st.push('font-weight:700');
+                if (u === '1') st.push('text-decoration:underline');
+                if (d === '1') st.push('opacity:.62');
+                lineHtml += `<span${st.length ? ` style="${st.join(';')}"` : ''}>`;
+            }
+            lineHtml += esc(c.ch);
+        }
+        if (run) lineHtml += '</span>';
+        out.push(lineHtml.replace(/\s+$/ , ' ').length || lineHtml ? lineHtml : '');
+    }
+    // trim trailing empty lines but keep structure
+    while (out.length && out[out.length - 1] === '') out.pop();
+    return out.join('\n');
+};
+
+/* ── playback ── */
+let emu = new Emu();
 function renderUpTo(t) {
-    buffer = '';
+    emu = new Emu();
     idx = 0;
     for (const c of chunks) {
         if (c.t > t) break;
-        buffer += stripAnsi(c.d);
+        emu.feed(c.d);
         idx++;
     }
-    if (buffer.length > 200000) buffer = '…[trimmed]…\n' + buffer.slice(-180000);
-    screenEl.textContent = buffer;
-    screenEl.scrollTop = screenEl.scrollHeight;
-    $('scrub').value = total ? Math.round((t / total) * 1000) : 0;
-    $('time').textContent = fmt(t) + ' / ' + fmt(total);
+    paint();
+}
+let paintQueued = false;
+function paint() {
+    if (paintQueued) return;
+    paintQueued = true;
+    requestAnimationFrame(() => {
+        paintQueued = false;
+        screenEl.innerHTML = emu.html();
+        screenEl.scrollTop = screenEl.scrollHeight;
+    });
 }
 function currentT() { return total ? (parseInt($('scrub').value, 10) / 1000) * total : 0; }
+function fmt(ms) { const s = Math.max(0, Math.round(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 function step() {
     if (!playing) return;
     const t = currentT();
@@ -114,28 +260,16 @@ function step() {
     if (!next) { pause(); return; }
     const delay = Math.max(8, (next.t - t) / parseFloat($('speed').value || '1'));
     timer = setTimeout(() => {
-        buffer += stripAnsi(next.d);
-        if (buffer.length > 200000) buffer = '…[trimmed]…\n' + buffer.slice(-180000);
-        screenEl.textContent = buffer;
-        screenEl.scrollTop = screenEl.scrollHeight;
+        emu.feed(next.d);
         idx++;
         $('scrub').value = total ? Math.round((next.t / total) * 1000) : 0;
         $('time').textContent = fmt(next.t) + ' / ' + fmt(total);
+        paint();
         step();
     }, delay);
 }
-function play() {
-    if (playing) return;
-    if (idx >= chunks.length) renderUpTo(0);
-    playing = true;
-    $('play').textContent = ' Pause';
-    step();
-}
-function pause() {
-    playing = false;
-    if (timer) clearTimeout(timer);
-    $('play').textContent = '▶ Play';
-}
+function play() { if (playing) return; if (idx >= chunks.length) renderUpTo(0); playing = true; $('play').textContent = '❚❚ Pause'; step(); }
+function pause() { playing = false; if (timer) clearTimeout(timer); $('play').textContent = '▶ Play'; }
 $('play').addEventListener('click', () => (playing ? pause() : play()));
 $('restart').addEventListener('click', () => { pause(); renderUpTo(0); });
 $('scrub').addEventListener('input', () => { pause(); renderUpTo(currentT()); });
@@ -156,12 +290,12 @@ $('speed').addEventListener('change', () => { if (playing) { pause(); play(); } 
         document.title = data.title + ' — Garuda Konsole replay';
         $('title').textContent = data.title;
         $('meta').textContent = new Date(data.createdAt).toLocaleString() + ' · ' + chunks.length + ' frames';
-        renderUpTo(0);
-        setTimeout(play, 400);
+        renderUpTo(total); // show the finished state first
+        $('scrub').value = 1000;
+        $('time').textContent = fmt(total) + ' / ' + fmt(total);
     } catch (e) {
         $('title').textContent = 'Replay unavailable';
-        screenEl.innerHTML = '<span class="err"></span>';
-        screenEl.firstChild.textContent = String(e.message || e);
+        screenEl.textContent = String(e.message || e);
     }
 })();
 </script>

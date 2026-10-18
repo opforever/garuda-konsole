@@ -828,6 +828,22 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     z52_hws.ws.close();
     await sleep(300);
 
+
+    console.log('── 5.2.1: recording library (~/Rec_jsonl) ──');
+    const z521_save = await j(`${B}/api/recordings`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ title: 'api rec', chunks: [{ t: 0, d: 'hello\r\n' }, { t: 50, d: 'world\r\n' }] }) });
+    check('recording saved into ~/Rec_jsonl', z521_save.status === 200 && /^garuda-replay-.*\.jsonl$/.test(z521_save.body.name || '') && String(z521_save.body.dir).endsWith('Rec_jsonl'));
+    const z521_list = await j(`${B}/api/recordings`, { headers: H });
+    check('library lists the recording', z521_list.status === 200 && (z521_list.body.recordings || []).some((r) => r.name === z521_save.body.name));
+    const z521_get = await j(`${B}/api/recordings/${z521_save.body.name}`, { headers: H });
+    check('recording reads back with header + chunks', z521_get.status === 200 && z521_get.body.chunks.length === 2 && z521_get.body.title === 'api rec');
+    const z521_trav = await j(`${B}/api/recordings/..%2F..%2Fetc%2Fpasswd`, { headers: H });
+    check('path traversal in name refused', z521_trav.status === 400 || z521_trav.status === 404);
+    const z521_big = await j(`${B}/api/recordings`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ chunks: [] }) });
+    check('empty recording rejected', z521_big.status === 400);
+    const z521_del = await j(`${B}/api/recordings/${z521_save.body.name}`, { method: 'DELETE', headers: H });
+    const z521_list2 = await j(`${B}/api/recordings`, { headers: H });
+    check('delete removes the file', z521_del.status === 200 && !(z521_list2.body.recordings || []).some((r) => r.name === z521_save.body.name));
+
     console.log(`\n═══ RESULT: ${passed} passed, ${failed} failed ═══`);
     if (serverProc) serverProc.kill();
     process.exit(failed ? 1 : 0);

@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.2.0';
+const APP_VERSION = '5.2.1';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS = {
     haptics: true,
     completionNotifications: true,
     healthPush: false,
+    autoSaveRecordings: true,
     bootAnim: true,
     reducedMotion: false,
     scrollSpeed: 4,
@@ -2223,6 +2224,12 @@ function stopRecording(tabId, auto) {
     tab.recording = null;
     tab.lastRecording = { title: tab.title, startedAt: rec.startedAt, stoppedAt: Date.now(), chunks: rec.chunks };
     updateRecordingUI();
+    /* 5.2.1: persist to the server-side library (~/Rec_jsonl) */
+    if (rec.chunks.length && getSettings().autoSaveRecordings !== false && !isViewerSession && token) {
+        api('/api/recordings', { method: 'POST', body: { title: `${tab.title} — ${new Date(rec.startedAt).toLocaleString()}`, chunks: rec.chunks } })
+            .then((r) => showToast({ type: 'success', title: 'Recording saved', text: `${r.name} → server ~/Rec_jsonl`, duration: 3200 }))
+            .catch(() => showToast({ type: 'warn', title: 'Recording not saved', text: 'Server recording library unavailable.', duration: 3200 }));
+    }
     if (auto) {
         showToast({ type: 'warn', title: 'Recording limit reached', text: `8 MB captured for "${tab.title}" — recording stopped. Replay or export it anytime this session.` });
         logActivity('warn', `Recording hit 8 MB limit in "${tab.title}"`);

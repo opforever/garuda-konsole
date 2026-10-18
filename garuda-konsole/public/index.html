@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-    <link rel="stylesheet" href="style.css?v=5.2.0" />
+    <link rel="stylesheet" href="style.css?v=5.2.1" />
 </head>
 <body>
 
@@ -744,6 +744,15 @@
                 </div>
                 <div class="setting-row">
                     <div class="setting-meta">
+                        <span class="setting-title">Auto-save recordings</span>
+                        <span class="setting-subtitle">Stopped recordings are kept server-side in ~/Rec_jsonl (open them from the palette)</span>
+                    </div>
+                    <div class="setting-row-actions">
+                        <label class="toggle-switch"><input type="checkbox" id="setting-auto-save-rec" /><span class="toggle-track"></span></label>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
                         <span class="setting-title">Boot animation</span>
                         <span class="setting-subtitle">Startup sequence after unlocking</span>
                     </div>
@@ -1413,7 +1422,7 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
-<script src="app.js?v=5.2.0"></script>
-<script src="ui.js?v=5.2.0"></script>
+<script src="app.js?v=5.2.1"></script>
+<script src="ui.js?v=5.2.1"></script>
 </body>
 </html>
