@@ -3176,3 +3176,60 @@ body.reduce-motion .orb { display: none; }
     margin-top: 6px; padding: 7px 9px; border-radius: 8px; font-size: 12px; line-height: 1.45;
     background: rgba(88, 166, 255, 0.08); border: 1px solid rgba(88, 166, 255, 0.25); color: var(--text);
 }
+
+/* ═══════ 5.1.4 — Interactive affordance: enabled must NOT look disabled ═══════
+   AFFORDANCE:START
+   Design-flaw fix (user-reported): "most buttons look grayed out like we can't
+   use them — even though we can." Every secondary control idled in
+   var(--text-dim) — the muted gray a DISABLED control should wear — while real
+   :disabled states had almost no styling, so the whole UI read as "off".
+
+   Two systematic rules, appended last so they win the cascade at equal
+   specificity (state classes like .toggled/.active/.on are (0,2,0) and still
+   take precedence):
+   1. Idle interactive elements get a theme-aware blend of the theme's OWN
+      --text and --text-dim — clearly readable on every built-in and custom
+      theme, still calmer than hover/active. The plain var(--text-dim)
+      declaration before each mix is the fallback for engines without
+      color-mix() support.
+   2. Truly disabled controls are dimmed + desaturated + not-allowed, so
+      "off" finally looks off. */
+.icon-btn,
+.btn-ghost,
+.btn-mini,
+.sb-btn,
+.ctx-item,
+.pin-chip,
+.ai-mode-btn,
+.select-mini,
+.theme-select-sm,
+.sel-toolbar button {
+    color: var(--text-dim); /* fallback: engines without color-mix() */
+    color: color-mix(in srgb, var(--text) 75%, var(--text-dim));
+}
+.tab {
+    color: var(--text-dim); /* fallback */
+    color: color-mix(in srgb, var(--text) 58%, var(--text-dim)); /* inactive tabs stay subtler than the active one */
+}
+
+button:disabled,
+button[aria-disabled="true"],
+.icon-btn:disabled,
+.btn-ghost:disabled,
+.btn-mini:disabled,
+.sb-btn:disabled,
+.ctx-item:disabled,
+.mk:disabled,
+.select-mini:disabled,
+select:disabled,
+input:disabled,
+textarea:disabled {
+    opacity: 0.4;
+    filter: saturate(0.25);
+    cursor: not-allowed;
+    box-shadow: none;
+}
+button:disabled:active,
+.icon-btn:disabled:active,
+.btn-mini:disabled:active { transform: none; }
+/* AFFORDANCE:END */

@@ -89,6 +89,23 @@ const undefVars = [...cssVarUses].filter((v) => !cssVarDefs.has(v) && !jsVarDefs
 if (undefVars.length) fail('CSS vars used but never defined: ' + undefVars.join(', '));
 else ok(`all ${cssVarUses.size} CSS vars defined`);
 
+/* 5b. Interactive affordance (5.1.4): enabled controls must not look disabled.
+   Guards the central override section so the muted-idle regression can't
+   sneak back in through a theme pass or CSS reorg. */
+const affStart = css.indexOf('AFFORDANCE:START');
+const affEnd = css.indexOf('AFFORDANCE:END');
+if (affStart === -1 || affEnd === -1 || affEnd < affStart) {
+    fail('affordance section missing in style.css (AFFORDANCE:START/END markers)');
+} else {
+    const aff = css.slice(affStart, affEnd);
+    const mustBrighten = ['.icon-btn', '.btn-ghost', '.btn-mini', '.sb-btn', '.ctx-item', '.pin-chip', '.ai-mode-btn', '.tab'];
+    const notCovered = mustBrighten.filter((c) => !aff.includes(c));
+    if (notCovered.length) fail('affordance section missing idle-brighten for: ' + notCovered.join(', '));
+    else if (!/color-mix\(in srgb, var\(--text\)/.test(aff)) fail('affordance section lost the theme-aware color-mix blend');
+    else if (!/button:disabled/.test(aff) || !/not-allowed/.test(aff)) fail('affordance section lost the disabled-state styling');
+    else ok('enabled controls out-bright the disabled look (affordance section intact)');
+}
+
 /* 6. Cross-file function references */
 console.log('═══ cross-file function check ═══');
 const definedFns = new Set();

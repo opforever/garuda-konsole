@@ -1,8 +1,8 @@
-# Garuda Konsole 5.1.3 🦅
+# Garuda Konsole 5.1.4 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.1.3-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-376%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.1.4-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-376%20passing-2fd07a)
 
 ---
 
@@ -210,6 +210,20 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🎨 What's new in 5.1.4 — buttons finally look clickable
+
+Real-world bug report: *"most of the buttons seem grayed out like we can't use them — even though we can. It's a design flaw."*
+
+Correct — and systemic. Every secondary control (toolbar icon buttons, ghost/mini buttons, tabs, status-bar buttons, context-menu items, pinned chips, AI-mode buttons, selects…) idled in `--text-dim`, which themes derive as text mixed **62% toward the background**. Result: washed-out controls that read as "disabled", while *actually* disabled controls had almost no distinct styling — so enabled and disabled were visually the same muted gray.
+
+- **Idle interactive elements now use a theme-aware blend** (`color-mix` of the theme's own `--text`/`--text-dim`), applied in one central section that wins the cascade. Measured WCAG contrast of idle controls vs background:
+  - dark themes: **3.2:1 → 11.6:1** (derived themes; the static default goes 7.1:1 → 11.6:1)
+  - light themes: **2.2:1 → 8.9:1** — the old value was *below the 3:1 WCAG minimum for UI components*, which is exactly why everything looked off
+  - works for all 26 built-in themes **and custom theme JSON** (it blends each theme's own variables); engines without `color-mix()` keep the previous color via declaration fallback
+- **Real disabled states are now visually distinct**: dimmed, desaturated, `not-allowed` cursor (buttons, selects, inputs) — "off" finally looks off, so "on" looks on.
+- State styles (`.toggled`, `.active`, `.on`, hover glows) keep precedence — the neon look is untouched, just no longer muted at rest.
+- Guarded by a new static check (the `AFFORDANCE:START/END` section must stay intact), so a future theme pass can't silently reintroduce the flaw.
 
 ## 🩹 What's new in 5.1.3 — voice replies & MP3 export work again (upstream churn)
 
