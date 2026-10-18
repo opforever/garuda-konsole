@@ -320,3 +320,153 @@ Everything below rides on the same three model families (chat: Qwen3.8-27B / GPT
 > TTS note: Orpheus needs a **one-time terms acceptance** in the Groq console (the server surfaces the exact URL if it's missing). STT works out of the box.
 
 Test totals: API **140**, frontend **223**, static checks clean.
+
+---
+
+# 🤖 AI Maintainer Handbook — session handoff
+
+> Written for the next AI/human session picking this repo up cold. Everything
+> below was learned the hard way in sandboxed sessions; the reusable harnesses
+> live in `tools/`. Read this before changing anything.
+
+## 1. Repo & runtime layout
+
+- The git root contains **one nested project dir**: `garuda-konsole/`
+  (`package.json`, `server.js`, `public/`, `test/`, `tools/`). Paths in commits
+  are therefore `garuda-konsole/public/…` etc.
+- Server: Express 5 + ws + node-pty (`server.js`, default port from `PORT` env).
+  Client: classic scripts `public/app.js` + `public/ui.js` (no bundler), styled
+  by `public/style.css`, shell in `public/index.html`, PWA via `public/sw.js`.
+- Login password default `20090228` (`KONSOLE_PASSWORD` env overrides).
+  Tests run with `KONSOLE_LOGIN_LIMIT=100000` to disable rate limiting.
+- `node-pty` needs build tools; sandboxes usually lack them → run
+  `sh test/setup-sandbox.sh` (installs deps `--ignore-scripts` and swaps in the
+  `child_process`-based stub from `test/stubs/node-pty`). On a real machine
+  plain `npm install` is correct.
+- `garuda.config.json` is **runtime state** (VAPID keys, push subscriptions,
+  triggers, schedules): test runs REWRITE it. Always
+  `git checkout -- garuda-konsole/garuda.config.json` before committing.
+
+## 2. Sandbox environment facts (why things behave strangely)
+
+- **Node is preinstalled** in the image (`/usr/local/bin/node`, v20.x) with npm
+  and registry access. There is **no browser** — see §3.
+- **Only `"$ARENA_WORKSPACE"` (the workspace) persists across sessions.** `/tmp`,
+  installed npm packages, downloaded Chromium, background processes: all gone
+  next session. Re-run `sh tools/browser-env.sh` and
+  `sh test/setup-sandbox.sh` at session start.
+- **Path-literal remap quirk (biggest trap).** The tool layer rewrites
+  `"$ARENA_WORKSPACE"` literals inside *bash command text* to the real tenant mount
+  (`"$ARENA_WORKSPACE"`), but does **not** rewrite file contents written by the
+  file tools. Consequences observed:
+  | What you did | Result |
+  |---|---|
+  | `node -e "…'"$ARENA_WORKSPACE"/x'…"` inline | works (literal rewritten, bash re-expands) |
+  | `cat > f.js <<'EOF'` heredoc containing `"$ARENA_WORKSPACE"` | file corrupted with literal `"$ARENA_WORKSPACE"` |
+  | script file (written via file tool) using `"$ARENA_WORKSPACE"/…` at runtime | `ENOENT` / `existsSync:false` — node's view has no such path |
+  | script deriving paths from `__dirname` / `process.cwd()` / `process.env` | always works |
+  **Rule: never hardcode absolute workspace paths in scripts; derive them at
+  runtime.** (This cost hours: spawn `ENOENT` red herrings, corrupted files.)
+- **Missing CLI tools:** no `curl`, `wget`, `pkill`, `pgrep`, `file`, `nc`.
+  Use `node -e "fetch(…)"` for HTTP; kill processes by scanning `/proc`:
+  `for d in /proc/[0-9]*; do tr '\0' ' ' < "$d/cmdline" | grep -q server.js && kill -9 ${d#/proc/}; done`
+- `HOME=/tmp` → playwright browsers land in `/tmp/.cache/ms-playwright`.
+
+## 3. Visual verification playbook (how the AI "sees" the UI)
+
+- `sh tools/browser-env.sh` — installs `playwright-core` + headless Chromium
+  into `/tmp` (idempotent; needed once per session).
+- `node tools/repro-context-menu.js` — boots server+app headless, logs in,
+  right-clicks the terminal, dumps computed color/opacity/cursor of every menu
+  entry, saves full + cropped screenshots.
+- `node tools/repro-approval-flow.js` — stubs `POST /api/ai/chat` at the
+  network layer (scripted replies, **no model key needed**) so the real agent
+  loop + approval cards run end-to-end; measures whether a pending approval
+  card is *crushed* (scrollHeight vs clientHeight, button rect vs card rect).
+  `REPRO_VH=560|640|900` to test viewport heights; point `REPRO_APP` at a
+  `git worktree` of an old commit to see bugs **red** before fixing.
+- `node tools/crop-image.js src out x y w h [zoom]` — crop/zoom user-supplied
+  screenshots. **Naive cropping fails**: Chromium's built-in `file://` image
+  viewer auto-fits large images, so offsetting an `<img>` yields the whole
+  picture scaled (or black). The canvas + `data:` URI approach in this tool is
+  the one that works.
+- How images reach the AI: user attachments are saved under `uploads/`;
+  reading any workspace `.png/.jpg/…` with the file-read tool renders it as
+  visible content; playwright `page.screenshot()` / element screenshots write
+  PNGs the same way. Element screenshots of the AI drawer look blurry because
+  of its `backdrop-filter` — judge layout by measurements, not pixels.
+- **Headless login recipe:** seed `localStorage` (`gk_tour_done=true`,
+  `gk_news_seen=JSON.stringify(APP_VERSION)`) via `addInitScript`; wait until
+  app scripts are *bound* (`typeof window.showToast === 'function'`) before
+  clicking `#login-btn` (CDN xterm scripts can lag); force-close leftovers with
+  `.modal-overlay → classList.add('hidden')`.
+- **Orphan-server trap:** always use a random port per run and ALWAYS kill the
+  server on exit. An orphaned server degrades after a while — `POST /api/login`
+  hangs forever while `/healthz` still answers (symptom: login button stuck
+  disabled, no login response). Kill orphans via the `/proc` scan above.
+- Clicks on AI-pane elements must go through `page.evaluate(el.click())`:
+  the pane re-renders on every state change (`innerHTML` rebuild), so
+  Playwright's stability waits time out on detached nodes.
+- Never `await page.evaluate(() => aiSend(…))` — the agent promise resolves
+  only when the whole task ends (i.e. after approvals you haven't clicked yet).
+  Use `void aiSend(…)`.
+
+## 4. Test suite map (`npm test`)
+
+1. `test/api-test.js` (143) — REST/WS against a live server.
+2. `test/frontend-test.js` (245) — real `app.js`+`ui.js` inside **jsdom**
+   against a live server; `ev(win, expr)` evaluates in page scope; stubs for
+   canvas/xterm/audio. jsdom has **no layout engine** — anything
+   geometry-related (flex crush, clipping) can NOT be tested here; use the
+   Chromium harnesses (§3) for that.
+3. `test/static-check.js` — ID/data-action/icon cross-checks, CSS sanity,
+   cross-file function refs, and the **guard invariants** (§5).
+
+## 5. Guard invariants (static-check will fail the build if broken)
+
+- `AFFORDANCE:START/END` (style.css, 5.1.4): idle interactive color blend +
+  real `:disabled` styling; `.ctx-item`, `.icon-btn`, … must stay listed.
+- `CTX-AFFORDANCE:START/END` (5.1.6): `.ctx-item { color: var(--text); }`
+  (no color-mix dependency), danger idle tint, `btn.disabled = true` in
+  `openCtxMenu`, no inline-opacity fakes.
+- `SCROLL-CRUSH:START/END` (5.1.7): children of scrollable flex columns
+  (`.ai-messages`, `.chat-messages`, `.drawer-body`,
+  `.server-sessions-list`) keep `flex-shrink: 0`; `.ai-cmd-card` guarded.
+- **Version lockstep**: `package.json` version == `package-lock` (both root
+  entries) == `APP_VERSION` (app.js) == `VERSION` (server.js) ==
+  `sw.js` `CACHE` name suffix == `?v=` query on `style.css`/`app.js`/`ui.js`
+  in `index.html` AND in the `sw.js` SHELL list. The `?v=` bust is what makes
+  old service workers (cache-first!) fetch fresh assets on first load after a
+  deploy — never drop it.
+
+## 6. Release routine (the loop every change follows)
+
+1. Reproduce first — headless Chromium (§3) or jsdom test; measure, don't guess.
+2. Fix the *systemic* cause (cascade/layout/state), not the symptom.
+3. Add regression tests: jsdom E2E where possible + a static-check guard for
+   CSS/JS invariants; layout bugs get a Chromium harness in `tools/`.
+4. `npm test` green (all three suites).
+5. Visual red/green: run the harness against a `git worktree` of the previous
+   commit (expect red) and the fixed tree (expect green), several viewport sizes.
+6. Bump version in ALL lockstep places (§5) + README title/badge/changelog.
+7. Commit in repo style (`fix(scope): X.Y.Z — summary` + detailed body),
+   restore `garuda.config.json`, ensure `node_modules/` untracked (.gitignore).
+8. Push to `origin main`. The remote URL carries a PAT; a `403 … denied` on
+   push means the token lacks write grants (verify with a temp-ref POST via
+   the REST API: `403 Resource not accessible by personal access token`).
+9. Report with measurements + screenshots, not adjectives.
+
+## 7. Case studies (methodology examples)
+
+- **5.1.6 "right-click menu grayed out but works"** — three stacked causes:
+  color-mix() fallback gray on old engines; disabled faked with inline
+  opacity on live buttons; and the stale-SW cache-first trap that kept old
+  CSS alive across deploys (→ version-busted URLs). Verified by computed
+  styles in Chromium, not by eyeballing.
+- **5.1.7 "approval buttons missing at 100% zoom, visible at 90%"** — user's
+  own zoom experiment cracked it: buttons always in DOM; scrollable flex
+  column compressed children (`flex-shrink:1`) and `.ai-cmd-card`
+  `overflow:hidden` clipped the action row. Proven red on the old commit
+  (83px content in 77px box, pane never scrolls), green after
+  `flex-shrink: 0` at 560/640/900px. Same mechanism explained the
+  "ctrl+/− breaks the page" report.
