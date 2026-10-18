@@ -1,8 +1,8 @@
-# Garuda Konsole 5.3.3 🦅
+# Garuda Konsole 5.3.4 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.3.3-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-460%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.3.4-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-460%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,16 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 🖥️ What's new in 5.3.4 — self-introspecting KWin screencast script
+
+The 5.3.0 script guessed KWin's D-Bus call signature; real Plasma disagreed.
+`tools/rd-screencast-kwin.sh` now **introspects at runtime**: discovers the
+Screencasting path/method, reads the method signature, auto-detects your
+connector from `/sys/class/drm` (GK_RD_SCREEN overrides), learns the PipeWire
+node from the `streamCreated` signal (or the call reply, per Plasma version),
+and on any failure dumps the full D-Bus introspect into the server log
+(`[rd-capture] …`) so diagnostics are one paste away.
 
 ## 🖥️ What's new in 5.3.3 — Remote Desktop gets a front door
 
