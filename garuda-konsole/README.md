@@ -1,8 +1,8 @@
-# Garuda Konsole 5.1.1 🦅
+# Garuda Konsole 5.1.2 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.1.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-363%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.1.2-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-370%20passing-2fd07a)
 
 ---
 
@@ -196,7 +196,7 @@ Default password: `20090228` (unchanged). Override everything via env:
 
 ## 🧪 Tests
 ```bash
-npm test           # api-test (140) + frontend-test (223) + static-check
+npm test           # api-test (140) + frontend-test (230) + static-check
 ```
 Each suite boots its own isolated server instance — no manual setup needed.
 The AI E2E tests stub `/api/ai/chat` in-page, so they never consume your Groq quota
@@ -210,6 +210,18 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🩹 What's new in 5.1.2 — stop painting pixels nobody can see
+
+Real-world bug report: *"why is there a background animation running? wasting resources for no reason and you can't even see it — the terminal is solid."*
+
+Exactly right. The **aurora canvas is lockscreen ambience** (the HTML comment says so), but `enterApp()` hid the lockscreen and never stopped the animation: a `requestAnimationFrame` loop kept doing an **O(n²) particle-link pass (up to ~3.5k pair checks) plus a full-screen canvas repaint — every frame, forever**, behind the opaque terminal UI. On a phone that's constant CPU/GPU burn (and battery) for invisible pixels. The CSS orbs/grid were already free once the lockscreen went `display:none` — the canvas was the leak.
+
+- `refreshAuroraMotion()` now runs the loop **only while the lockscreen is visible** (and motion isn't reduced): on unlock the rAF is cancelled, the canvas is cleared *and* set `display:none` so it isn't even composited.
+- Wired into every transition: host unlock (`enterApp`), viewer sessions, and re-shown lockscreen (logout reloads, so ambience returns naturally).
+- The lockscreen itself keeps its full animated look — nothing visible was removed.
+
+Tests: frontend **230** (+7 lifecycle checks — stopped after unlock, rAF cancelled, canvas not composited, resumes for the lockscreen, reduce-motion still honored). Verified red against the pre-fix code.
 
 ## 🩹 What's new in 5.1.1 — notifications that survive blocked push services
 

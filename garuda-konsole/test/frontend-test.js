@@ -1128,6 +1128,27 @@ function visible(win, id) {
         delete document.hidden;
     `);
 
+    /* ── 5.1.2: aurora (lockscreen ambience) lifecycle ──
+       Regression: the aurora rAF particle loop kept repainting a fullscreen
+       canvas after unlock — behind the opaque terminal UI it was invisible,
+       yet burned CPU/GPU every frame (O(n²) link pass + full repaint). */
+    console.log('── 5.1.2: aurora only animates for the visible lockscreen ──');
+    check('aurora loop stopped after unlock', ev(rwin, 'aurora.running') === false);
+    check('aurora rAF cancelled after unlock', ev(rwin, 'aurora.raf') === null);
+    check('aurora canvas display:none while unlocked', ev(rwin, `document.getElementById('aurora-canvas').style.display`) === 'none');
+    ev(rwin, `document.getElementById('lockscreen').classList.remove('hidden'); refreshAuroraMotion();`);
+    await tick(80);
+    check('aurora resumes when the lockscreen is shown again', ev(rwin, 'aurora.running') === true && ev(rwin, `document.getElementById('aurora-canvas').style.display`) === '');
+    check('resumed aurora schedules animation frames', ev(rwin, 'aurora.raf') !== null);
+    ev(rwin, `document.getElementById('lockscreen').classList.add('hidden'); refreshAuroraMotion();`);
+    await tick(80);
+    check('aurora stops again when the lockscreen hides', ev(rwin, 'aurora.running') === false && ev(rwin, 'aurora.raf') === null);
+    ev(rwin, `document.getElementById('lockscreen').classList.remove('hidden'); document.body.classList.add('reduce-motion'); refreshAuroraMotion();`);
+    await tick(40);
+    check('reduce-motion keeps the aurora off even on the lockscreen', ev(rwin, 'aurora.running') === false);
+    ev(rwin, `document.body.classList.remove('reduce-motion'); document.getElementById('lockscreen').classList.add('hidden'); refreshAuroraMotion();`);
+    await tick(40);
+
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
     const relevant = fatalErrors.filter((e) => !/Could not load|favicon|Not implemented|blob:fake/i.test(e));

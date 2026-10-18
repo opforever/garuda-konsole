@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.1.1';
+const APP_VERSION = '5.1.2';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -915,6 +915,10 @@ async function enterApp(silent) {
     const appEl = $('app');
     if (lock) lock.classList.add('hidden');
     if (appEl) appEl.classList.remove('hidden');
+    /* The aurora is lockscreen ambience — stop its animation loop now that
+       it's behind the opaque app UI (it would repaint invisible pixels
+       forever otherwise). */
+    if (typeof refreshAuroraMotion === 'function') refreshAuroraMotion();
 
     const brandShell = $('brand-shell');
     if (brandShell) brandShell.textContent = (serverMeta && serverMeta.shell) || 'konsole';
@@ -3251,6 +3255,7 @@ async function checkAndInitViewerSession() {
     const appEl = $('app');
     if (lock) lock.classList.add('hidden');
     if (appEl) appEl.classList.remove('hidden');
+    if (typeof refreshAuroraMotion === 'function') refreshAuroraMotion(); // stop lockscreen ambience
     const toolbar = $('main-toolbar');
     if (toolbar) toolbar.classList.add('hidden');
     const topbar = $('viewer-topbar');
@@ -3531,6 +3536,7 @@ async function init() {
         } else {
             const lock = $('lockscreen');
             if (lock) lock.classList.remove('hidden');
+            if (typeof refreshAuroraMotion === 'function') refreshAuroraMotion(); // lockscreen visible → ambience on
             const input = $('password-input');
             if (input) setTimeout(() => input.focus(), 300);
         }

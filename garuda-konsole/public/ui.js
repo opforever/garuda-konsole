@@ -177,15 +177,27 @@ function refreshAuroraColors() {
 }
 
 function refreshAuroraMotion() {
-    const reduced = document.body.classList.contains('reduce-motion');
-    if (reduced) {
+    /* The aurora is lockscreen ambience. Once unlocked it sits behind the
+       opaque terminal UI — animating it there burns CPU/GPU every frame
+       (an O(n²) particle-link pass + full-canvas repaint) for pixels nobody
+       can see. So it runs ONLY while the lockscreen is visible and motion
+       isn't reduced; otherwise the loop is cancelled and the canvas is
+       display:none so it isn't even composited. */
+    const lockEl = $('lockscreen');
+    const lockVisible = !lockEl || !lockEl.classList.contains('hidden');
+    const want = lockVisible && !document.body.classList.contains('reduce-motion');
+    if (!want) {
         aurora.running = false;
         if (aurora.raf) cancelAnimationFrame(aurora.raf);
         aurora.raf = null;
         if (aurora.ctx && aurora.canvas) aurora.ctx.clearRect(0, 0, aurora.canvas.width, aurora.canvas.height);
-    } else if (!aurora.running) {
-        aurora.running = true;
-        auroraLoop();
+        if (aurora.canvas) aurora.canvas.style.display = 'none';
+    } else {
+        if (aurora.canvas) aurora.canvas.style.display = '';
+        if (!aurora.running) {
+            aurora.running = true;
+            auroraLoop();
+        }
     }
 }
 
