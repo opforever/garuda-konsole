@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.3.1';
+const VERSION = '5.3.2';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -1043,14 +1043,32 @@ const RD_KEYMAP = {
     ControlLeft: 29, ControlRight: 97, ShiftLeft: 42, ShiftRight: 54, AltLeft: 56, AltRight: 100, MetaLeft: 125, MetaRight: 126, CapsLock: 58
 };
 let rdSock = null;
+let rdSpawnAt = 0;
+function rdSpawnYdotoold(sock) {
+    // self-heal: stale socket (ECONNREFUSED) or missing daemon → relaunch once per 10 s
+    if (!rdHasBin('ydotoold')) return;
+    const now = Date.now();
+    if (now - rdSpawnAt < 10000) return;
+    rdSpawnAt = now;
+    try {
+        if (sock) { try { fs.unlinkSync(sock); } catch (e) {} } // stale socket file left by a dead daemon
+        const child = require('child_process').spawn('ydotoold', [], { stdio: 'ignore', detached: true });
+        child.unref();
+        log('[rd] spawned ydotoold (self-heal)');
+    } catch (e) {}
+}
 function rdSendYdotoold(bufs) {
     const sock = rdYdotoolSocket();
-    if (!sock) return false;
+    if (!sock) { rdSpawnYdotoold(null); return false; }
     try {
         const net = require('net');
         if (!rdSock || rdSock.destroyed) {
             rdSock = net.connect(sock);
-            rdSock.on('error', () => { try { rdSock.destroy(); } catch (e) {} rdSock = null; });
+            rdSock.on('error', (e) => {
+                try { rdSock.destroy(); } catch (e2) {}
+                rdSock = null;
+                if (e && e.code === 'ECONNREFUSED') rdSpawnYdotoold(sock); // stale socket → relaunch daemon
+            });
         }
         rdSock.write(Buffer.concat(bufs));
         return true;
