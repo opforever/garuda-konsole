@@ -1,8 +1,8 @@
-# Garuda Konsole 5.1.7 🦅
+# Garuda Konsole 5.2.0 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.1.7-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-388%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.2.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-433%20passing-2fd07a)
 
 ---
 
@@ -210,6 +210,16 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🚀 What's new in 5.2.0 — five requested features, one release
+
+1. **Per-tab process-health badge** — the server samples every session's process subtree from `/proc` each tick (CPU jiffies + RSS); a tab whose tree spikes gets a pulsing **🔥** (or **⏳** for a command running past the threshold) with a details tooltip, plus an *optional* push via Settings → "Tab health alerts". Thresholds are env knobs: `GK_HEALTH_CPU` (default 90 %/core), `GK_HEALTH_RSS_MB` (1536), `GK_HEALTH_MIN` (10), `GK_STATS_TICK_MS` (5000). With never-dying tabs, you can finally see *which* tab eats the box.
+2. **Saved workspace layouts (any device)** — palette → *"Save current layout…"* stores tabs (id/title/color), split mode/focus, active tab and each shell's **live cwd** server-side. *"Restore layout: …"* reconnects to still-alive shells (persistent memory!) or spawns fresh ones and `cd`s back. On a brand-new device with no local tabs, login **offers to restore** your newest layout.
+3. **In-browser file editor** — Files → ✎ opens a mono sheet: Ctrl+S saves, dirty dot, discard guard on close. Server writes **atomically** (tmp + rename), keeps one `.bak` generation, answers **409** when the file changed on disk since you opened it (with an overwrite confirm), caps at 5 MB and refuses protected system paths. Fix a config line from your phone at last.
+4. **System monitor: last hour + process manager** — a server-side ring buffer (720 samples: cpu/mem/net/disk) renders as four sparklines ("Last hour"), and a top-60 **process list** adds per-row renice ↑/↓, `stop` (SIGTERM) and `kill` (SIGKILL, confirmed) — all behind `pidGuard`: pid 1, the server itself, its whole ancestor chain and other users' pids are refused.
+5. **Replay share links** — the replay modal gains *share as public link*: the recording is stored for 24 h and minted into a token URL serving a **dependency-free public player** (`replay.html`: play/pause, speed, scrubber, ANSI-stripped timeline, read-only badge) — plus *download .cast* (asciinema v2) for `agg`/`asciinema` tooling. The token is the capability; creating shares still requires auth.
+
+Guards & proof: 29 new API checks (layouts CRUD; write/.bak/409/protected/missing-dir; kill & renice guard matrix incl. a real spawned process; history ring; replay share → public fetch → 404; **live busy-loop → hot push → idle ok over a real WS**), 16 new frontend E2E checks, a static-guard for the 5.2 surface, and `tools/verify-features-52.js` — a 12-point headless-Chromium feature verification with screenshots (editor sheet, monitor drawer, 🔥 tab badge, public player). Suite: **API 172, frontend 261, statics green**. Version lockstep 5.2.0 incl. `?v=` cache-bust and SW cache; `replay.html` added to the SW shell.
 
 ## 🩹 What's new in 5.1.7 — approval buttons can't hide anymore (scroll, never crush)
 

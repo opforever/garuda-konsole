@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.1.7';
+const VERSION = '5.2.0';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -612,6 +612,344 @@ app.get('/api/stats', requireAuth, (req, res) => {
         viewers,
         version: VERSION
     });
+});
+
+/* ─────────────── 5.2: monitor history ring, process manager, tab health ─────────────── */
+
+const STATS_RING_MAX = 720;                 // 5 s ticks → 1 hour of history
+const STATS_TICK_MS = clampInt(process.env.GK_STATS_TICK_MS, 200, 600000, 5000);
+const HEALTH_CPU = clampInt(process.env.GK_HEALTH_CPU, 1, 100, 90);           // % of one core, per tab tree
+const HEALTH_RSS_MB = clampInt(process.env.GK_HEALTH_RSS_MB, 64, 65536, 1536);
+const HEALTH_MIN = clampInt(process.env.GK_HEALTH_MIN, 1, 600, 10);           // long-running foreground command
+const statsRing = [];
+const ringCpuStore = { ref: null };
+let netPrev = null;
+const procJiffPrev = new Map();   // pid → { jiff, at }  (process list cpu%)
+const healthPrev = new Map();     // pid → { jiff, at }  (tab health cpu%)
+
+function cpuSample(store) {
+    const cpus = os.cpus();
+    let idle = 0, total = 0;
+    for (const c of cpus) {
+        idle += c.times.idle;
+        total += c.times.user + c.times.nice + c.times.sys + c.times.irq + c.times.idle;
+    }
+    let pct = 0;
+    if (store.ref && total > store.ref.total) {
+        pct = Math.max(0, Math.min(100, (1 - (idle - store.ref.idle) / (total - store.ref.total)) * 100));
+    }
+    store.ref = { idle, total };
+    return Math.round(pct * 10) / 10;
+}
+
+function readNetBytes() {
+    try {
+        const lines = fs.readFileSync('/proc/net/dev', 'utf8').split('\n').slice(2);
+        let rx = 0, tx = 0;
+        for (const line of lines) {
+            const halves = line.split(':');
+            if (halves.length < 2) continue;
+            const f = halves[1].trim().split(/\s+/).map(Number);
+            rx += f[0] || 0;
+            tx += f[8] || 0;
+        }
+        return { rx, tx, at: Date.now() };
+    } catch (e) { return null; }
+}
+
+function diskPct() {
+    try {
+        if (typeof fs.statfsSync === 'function') {
+            const st = fs.statfsSync(process.env.HOME || '/');
+            if (st.blocks > 0) return Math.round((1 - st.bavail / st.blocks) * 1000) / 10;
+        }
+    } catch (e) {}
+    return null;
+}
+
+/* Parse /proc into a pid map: { pid: {pid,ppid,comm,state,utime,stime,nice,rss,cmd} } */
+function readProcTable() {
+    const table = new Map();
+    let dirs = [];
+    try { dirs = fs.readdirSync('/proc'); } catch (e) { return table; }
+    const pageSize = 4096;
+    for (const d of dirs) {
+        if (!/^\d+$/.test(d)) continue;
+        const pid = +d;
+        try {
+            const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+            const lp = stat.indexOf('(');
+            const rp = stat.lastIndexOf(')');
+            if (lp === -1 || rp === -1) continue;
+            const comm = stat.slice(lp + 1, rp);
+            const f = stat.slice(rp + 2).split(' ');
+            const state = f[0];
+            const ppid = +f[1] || 0;
+            const utime = +f[11] || 0;
+            const stime = +f[12] || 0;
+            const nice = +f[16] || 0;
+            let rss = 0;
+            try {
+                const statm = fs.readFileSync(`/proc/${pid}/statm`, 'utf8').trim().split(/\s+/).map(Number);
+                rss = (statm[1] || 0) * pageSize;
+            } catch (e) {}
+            let cmd = comm;
+            try {
+                const cl = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim();
+                if (cl) cmd = cl.slice(0, 120);
+            } catch (e) {}
+            table.set(pid, { pid, ppid, comm, state, utime, stime, nice, rss, cmd });
+        } catch (e) { /* process vanished mid-scan */ }
+    }
+    return table;
+}
+
+function cpuPctFor(pid, jiff, map, now) {
+    const prev = map.get(pid);
+    map.set(pid, { jiff, at: now });
+    if (!prev) return 0;
+    const dtMs = now - prev.at;
+    if (dtMs <= 0) return 0;
+    // 100 jiffies/s = one full core → pct = dj * 1000 / dtMs
+    return Math.max(0, Math.round(((jiff - prev.jiff) * 1000 / dtMs) * 10) / 10);
+}
+
+/* Per-tab health: sum CPU/RSS over the session's process subtree; flag long runners */
+function collectTabHealth(now, table) {
+    const children = new Map();
+    for (const p of table.values()) {
+        if (!children.has(p.ppid)) children.set(p.ppid, []);
+        children.get(p.ppid).push(p.pid);
+    }
+    for (const [tabId, session] of sessions.entries()) {
+        const rootPid = session.ptyProcess && session.ptyProcess.pid;
+        if (!rootPid || !session.alive) {
+            if (session.healthLevel) {
+                session.healthLevel = null;
+                broadcastCtrl(session, { type: 'tab-health', tabId, level: 'ok', cpu: 0, rssMb: 0, mins: 0 });
+            }
+            continue;
+        }
+        let cpu = 0, rss = 0, running = false;
+        const queue = [rootPid];
+        const seen = new Set();
+        while (queue.length) {
+            const pid = queue.shift();
+            if (seen.has(pid)) continue;
+            seen.add(pid);
+            const p = table.get(pid);
+            if (!p) continue;
+            cpu += cpuPctFor(pid, p.utime + p.stime, healthPrev, now);
+            rss += p.rss;
+            if (p.state === 'R' && pid !== rootPid) running = true;
+            const kids = children.get(pid);
+            if (kids) for (const k of kids) queue.push(k);
+        }
+        cpu = Math.round(cpu * 10) / 10;
+        const rssMb = Math.round(rss / 1048576);
+        if (running) { if (!session.longSince) session.longSince = now; } else session.longSince = null;
+        const mins = session.longSince ? Math.floor((now - session.longSince) / 60000) : 0;
+        const level = (cpu >= HEALTH_CPU || rssMb >= HEALTH_RSS_MB || mins >= HEALTH_MIN) ? 'hot' : 'ok';
+        if (level !== session.healthLevel) {
+            session.healthLevel = level;
+            broadcastCtrl(session, { type: 'tab-health', tabId, level, cpu, rssMb, mins });
+            if (level === 'hot') log(`[health] tab ${tabId} hot: cpu=${cpu}% rss=${rssMb}MB mins=${mins}`);
+        }
+    }
+}
+
+function collectStatsTick() {
+    const now = Date.now();
+    const cpu = cpuSample(ringCpuStore);
+    const totalMem = os.totalmem();
+    const memPct = totalMem ? Math.round(((totalMem - os.freemem()) / totalMem) * 1000) / 10 : null;
+    const net = readNetBytes();
+    let rx = 0, tx = 0;
+    if (net && netPrev && net.at > netPrev.at) {
+        const dt = (net.at - netPrev.at) / 1000;
+        rx = Math.max(0, Math.round((net.rx - netPrev.rx) / dt));
+        tx = Math.max(0, Math.round((net.tx - netPrev.tx) / dt));
+    }
+    netPrev = net;
+    statsRing.push({ t: now, cpu, mem: memPct, rx, tx, disk: diskPct() });
+    while (statsRing.length > STATS_RING_MAX) statsRing.shift();
+    collectTabHealth(now, readProcTable());
+}
+setInterval(collectStatsTick, STATS_TICK_MS);
+
+app.get('/api/stats/history', requireAuth, (req, res) => {
+    res.json({ tickMs: STATS_TICK_MS, ring: statsRing.slice(-STATS_RING_MAX) });
+});
+
+function pidGuard(pid) {
+    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return 'refused pid';
+    const table = readProcTable();
+    if (!table.has(pid)) return 'no such process';
+    try {
+        const st = fs.statSync(`/proc/${pid}`);
+        if (typeof process.getuid === 'function' && st.uid !== process.getuid()) return 'not your process';
+    } catch (e) { return 'no such process'; }
+    let cur = process.pid;
+    for (let hop = 0; hop < 32 && cur > 1; hop++) {
+        if (cur === pid) return 'refused: ancestor of the server';
+        const p = table.get(cur);
+        if (!p) break;
+        cur = p.ppid;
+    }
+    return null;
+}
+
+app.get('/api/processes', requireAuth, (req, res) => {
+    const now = Date.now();
+    const rows = [];
+    for (const p of readProcTable().values()) {
+        rows.push({
+            pid: p.pid, ppid: p.ppid, comm: p.comm, cmd: p.cmd, state: p.state,
+            cpu: cpuPctFor(p.pid, p.utime + p.stime, procJiffPrev, now),
+            rssMb: Math.round((p.rss / 1048576) * 10) / 10,
+            nice: p.nice
+        });
+    }
+    rows.sort((a, b) => b.cpu - a.cpu || b.rssMb - a.rssMb);
+    res.json({ processes: rows.slice(0, 60) });
+});
+
+app.post('/api/processes/kill', requireAuth, (req, res) => {
+    const pid = (req.body && req.body.pid) | 0;
+    const name = ['TERM', 'INT', 'HUP', 'KILL'].includes(req.body && req.body.signal) ? req.body.signal : 'TERM';
+    const err = pidGuard(pid);
+    if (err) return res.status(403).json({ error: err });
+    try {
+        process.kill(pid, 'SIG' + name); // this Node build rejects bare names
+        res.json({ success: true, pid, signal: name });
+    } catch (e) {
+        res.status(e.code === 'ESRCH' ? 404 : 500).json({ error: 'kill failed: ' + (e.code || e.message) });
+    }
+});
+
+app.post('/api/processes/nice', requireAuth, (req, res) => {
+    const pid = (req.body && req.body.pid) | 0;
+    const value = clampInt(req.body && req.body.value, -20, 19, null);
+    if (value === null) return res.status(400).json({ error: 'value must be -20..19' });
+    const err = pidGuard(pid);
+    if (err) return res.status(403).json({ error: err });
+    require('child_process').execFile('renice', ['-n', String(value), '-p', String(pid)], { timeout: 5000 }, (e, out, stderr) => {
+        if (e) return res.status(500).json({ error: String(stderr || e.message).slice(0, 200) });
+        res.json({ success: true, pid, value });
+    });
+});
+
+/* ─────────────── 5.2: saved workspace layouts (server-side → any device) ─────────────── */
+
+app.get('/api/layouts', requireAuth, (req, res) => {
+    const cfg = loadConfigFile();
+    res.json({ layouts: Array.isArray(cfg.layouts) ? cfg.layouts : [] });
+});
+
+app.post('/api/layouts', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const name = String(body.name || '').trim().slice(0, 40);
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    if (!Array.isArray(body.tabs) || !body.tabs.length) return res.status(400).json({ error: 'tabs are required' });
+    const tabs = body.tabs.slice(0, 12).map((t) => {
+        const session = sessions.get(String(t.tabId || ''));
+        return {
+            tabId: String(t.tabId || '').slice(0, 40),
+            title: String(t.title || 'tab').slice(0, 60),
+            color: String(t.color || '').slice(0, 20),
+            cwd: session ? getSessionCwd(session) : null,
+            alive: !!session
+        };
+    });
+    const layout = {
+        id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'layout',
+        name,
+        tabs,
+        split: body.split && body.split.mode ? { mode: body.split.mode === 'h' ? 'h' : 'v', focus: body.split.focus === 1 ? 1 : 0 } : null,
+        active: clampInt(body.active, 0, 11, 0),
+        updatedAt: Date.now()
+    };
+    const cfg = loadConfigFile();
+    if (!Array.isArray(cfg.layouts)) cfg.layouts = [];
+    const at = cfg.layouts.findIndex((l) => l && l.id === layout.id);
+    if (at >= 0) cfg.layouts[at] = layout; else cfg.layouts.push(layout);
+    cfg.layouts = cfg.layouts.slice(-20);
+    saveConfigFile(cfg);
+    res.json({ success: true, layout });
+});
+
+app.delete('/api/layouts/:id', requireAuth, (req, res) => {
+    const cfg = loadConfigFile();
+    if (!Array.isArray(cfg.layouts)) return res.json({ success: true });
+    cfg.layouts = cfg.layouts.filter((l) => l && l.id !== req.params.id);
+    saveConfigFile(cfg);
+    res.json({ success: true });
+});
+
+/* ─────────────── 5.2: in-browser file editor (atomic write + .bak) ─────────────── */
+
+app.post('/api/files/write', requireAuth, (req, res) => {
+    try {
+        const body = req.body || {};
+        const target = typeof body.path === 'string' ? path.resolve(body.path) : null;
+        const content = typeof body.content === 'string' ? body.content : null;
+        if (!target || content === null) return res.status(400).json({ error: 'path and content are required' });
+        if (target.includes('\u0000')) return res.status(400).json({ error: 'Invalid path' });
+        if (Buffer.byteLength(content, 'utf8') > 5 * 1024 * 1024) return res.status(413).json({ error: 'Refusing to write more than 5 MB' });
+        const exists = fs.existsSync(target);
+        if (exists) {
+            if (PROTECTED_PATHS.has(target)) return res.status(403).json({ error: 'Refusing to write a protected system path' });
+            if (!fs.statSync(target).isFile()) return res.status(400).json({ error: 'Not a file' });
+            const mtime = fs.statSync(target).mtimeMs;
+            if (typeof body.mtime === 'number' && !body.force && Math.abs(mtime - body.mtime) > 1) {
+                return res.status(409).json({ error: 'File changed on disk since you opened it', mtime });
+            }
+            fs.copyFileSync(target, target + '.bak'); // one backup generation
+        } else {
+            if (!isExistingDir(path.dirname(target))) return res.status(404).json({ error: 'Parent directory not found' });
+        }
+        const tmp = target + '.gk-tmp';
+        fs.writeFileSync(tmp, content, 'utf8');
+        fs.renameSync(tmp, target); // atomic replace
+        const st = fs.statSync(target);
+        res.json({ success: true, bytes: st.size, mtime: st.mtimeMs, backup: exists ? target + '.bak' : null });
+    } catch (err) {
+        const code = err && err.code === 'EACCES' ? 403 : 500;
+        res.status(code).json({ error: 'Failed to write file' });
+    }
+});
+
+/* ─────────────── 5.2: replay share links (public 24 h player page) ─────────────── */
+
+const replayShares = new Map(); // token → { token, title, events, createdAt }
+const REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
+function purgeReplayShares() {
+    const now = Date.now();
+    for (const [t, r] of replayShares.entries()) if (now - r.createdAt > REPLAY_TTL_MS) replayShares.delete(t);
+    while (replayShares.size > 50) replayShares.delete(replayShares.keys().next().value);
+}
+setInterval(purgeReplayShares, 60 * 60 * 1000);
+
+app.post('/api/replay/share', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const events = Array.isArray(body.events) ? body.events : null;
+    if (!events || !events.length) return res.status(400).json({ error: 'events are required' });
+    let bytes = 0;
+    for (const ev of events) {
+        if (!ev || typeof ev.t !== 'number' || typeof ev.d !== 'string') return res.status(400).json({ error: 'bad event shape' });
+        bytes += ev.d.length;
+        if (bytes > 4 * 1024 * 1024) return res.status(413).json({ error: 'replay too large to share (4 MB cap)' });
+    }
+    purgeReplayShares();
+    const token = 'replay_' + crypto.randomBytes(10).toString('hex');
+    replayShares.set(token, { token, title: String(body.title || 'Terminal replay').slice(0, 80), events, createdAt: Date.now() });
+    res.json({ success: true, token, url: '/replay.html?r=' + token, expiresAt: Date.now() + REPLAY_TTL_MS });
+});
+
+app.get('/api/replay/:token', (req, res) => {
+    const share = replayShares.get(req.params.token);
+    if (!share || Date.now() - share.createdAt > REPLAY_TTL_MS) return res.status(404).json({ error: 'Replay not found or expired' });
+    res.json({ title: share.title, createdAt: share.createdAt, events: share.events });
 });
 
 /* ──────────────────────────── REST: shells & git ──────────────────────────── */

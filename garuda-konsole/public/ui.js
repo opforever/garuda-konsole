@@ -336,6 +336,7 @@ function startStatsPoller() {
     statsTimer = setInterval(() => {
         if (document.hidden || !token || isViewerSession) return;
         loadStats();
+        if (typeof refreshMonitorExtras === 'function') refreshMonitorExtras();
     }, 4000);
 }
 
@@ -682,6 +683,7 @@ function renderFilesList() {
         let actions = '';
         if (!entry.dir) {
             actions += `<button class="icon-btn" data-action="file-download" data-path="${escHtml(full)}" title="Download"><svg class="ic"><use href="#i-download"></use></svg></button>`;
+            actions += `<button class="icon-btn" data-action="files-edit" data-path="${escHtml(full)}" title="Edit in browser"><svg class="ic"><use href="#i-edit"></use></svg></button>`;
         } else {
             actions += `<button class="icon-btn" data-action="file-cd" data-path="${escHtml(full)}" title="cd here in terminal"><svg class="ic"><use href="#i-corner"></use></svg></button>`;
         }
@@ -887,20 +889,26 @@ function buildPaletteItems(query) {
     pushScored({ sec: 'Voice', icon: '#i-chat', title: 'Dictate a shell command', sub: 'voice → confirm → run', kw: 'voice dictation whisper command microphone', run: () => { closePalette(); aiMicToggle('cmd'); } }, 'voice dictate command whisper');
     pushScored({ sec: 'Voice', icon: '#i-download', title: 'Save last AI reply as audio (WAV)', sub: 'download spoken audio', kw: 'wav mp3 export download voice reply', run: () => { closePalette(); const it = aiState.ui.slice().reverse().find((i) => i.text); if (it) downloadTextAsMp3(it.text, it.id); else showToast({ type: 'info', title: 'No AI reply to export yet' }); } }, 'mp3 export reply voice');
     for (const r of getRecentCommands().slice(0, 40)) pushScored({ sec: 'Recent', icon: '#i-clock', title: r, sub: 'run again', kw: r, run: () => { runCommandInActiveTab(r); closePalette(); } }, r);
+    /* 5.2: saved workspace layouts */
+    pushScored({ sec: 'Layouts', icon: '#i-save', title: 'Save current layout…', sub: 'tabs + splits + colors', kw: 'layout save workspace snapshot arrange', run: () => { closePalette(); saveCurrentLayoutPrompt(); } }, 'save layout workspace snapshot');
+    for (const l of layoutsCache) {
+        pushScored({ sec: 'Layouts', icon: '#i-split', title: 'Restore layout: ' + l.name, sub: `${l.tabs.length} tab(s)${l.split ? ' + split' : ''}`, kw: 'layout restore workspace', run: () => { closePalette(); restoreLayout(l); } }, 'restore layout ' + l.name);
+        pushScored({ sec: 'Layouts', icon: '#i-trash', title: 'Delete layout: ' + l.name, sub: 'remove saved snapshot', kw: 'layout delete remove', run: () => { closePalette(); deleteLayout(l.id); } }, 'delete layout ' + l.name);
+    }
     if (q) {
         for (const id of Object.keys(BUILTIN_THEMES)) pushScored({ sec: 'Themes', icon: '#i-palette', title: BUILTIN_THEMES[id].name, sub: 'switch theme', kw: 'theme color ' + id, run: () => { applyTheme(id); showToast({ type: 'success', title: 'Theme applied', text: BUILTIN_THEMES[id].name, duration: 2200 }); } }, BUILTIN_THEMES[id].name + ' theme ' + id);
         for (const id of Object.keys(customThemes)) pushScored({ sec: 'Themes', icon: '#i-star', title: customThemes[id].name, sub: 'custom theme', kw: 'theme color custom ' + id, run: () => applyTheme(id) }, customThemes[id].name + ' theme ' + id);
     }
 
     out.sort((a, b) => b.score - a.score);
-    const SEC_ORDER = { Actions: 0, Macros: 1, Recent: 2, Themes: 3 };
+    const SEC_ORDER = { Actions: 0, Macros: 1, Recent: 2, Themes: 3, Layouts: 4 };
     let limited = q ? out.slice(0, 42) : limitNoQuery(out);
     limited.sort((a, b) => (SEC_ORDER[a.item.sec] - SEC_ORDER[b.item.sec]) || (b.score - a.score));
     return limited.map((o) => o.item);
 }
 
 function limitNoQuery(scored) {
-    const caps = { Actions: 99, Macros: 5, Recent: 6, Themes: 0 };
+    const caps = { Actions: 99, Macros: 5, Recent: 6, Themes: 0, Layouts: 10 };
     const counts = {};
     return scored.filter((o) => {
         const c = counts[o.item.sec] || 0;
@@ -971,6 +979,7 @@ function togglePalette() {
 }
 
 function openPalette() {
+    if (typeof refreshLayoutsCache === 'function') refreshLayoutsCache();
     const ov = $('palette-overlay');
     const input = $('palette-input');
     if (!ov || !input) return;
@@ -1358,6 +1367,7 @@ function syncSettingsUI() {
     chk('setting-ui-sounds', s.uiSounds);
     chk('setting-haptics', s.haptics);
     chk('setting-completion-notif', s.completionNotifications);
+    chk('setting-health-push', !!s.healthPush);
     chk('setting-boot-anim', s.bootAnim);
     chk('setting-reduced-motion', s.reducedMotion);
     set('setting-scroll-speed', s.scrollSpeed);
@@ -2038,6 +2048,16 @@ const ACTIONS = {
     'ai-hint': (node) => { const i = $('ai-input'); if (i) { i.value = node.dataset.text || ''; aiSendFromInput(); } },
     'ai-cmd-run': (node) => aiResolveDecision('run'),
     'ai-cmd-skip': (node) => aiResolveDecision('skip'),
+    'files-edit': (node) => openEditor(node.dataset.path),
+    'editor-save': () => editorSave(false),
+    'editor-close': () => closeEditor(),
+    'replay-share': () => shareReplayLink(),
+    'replay-cast': () => downloadReplayCast(),
+    'proc-kill': (node) => procSignal(node.dataset.pid, 'TERM'),
+    'proc-kill9': (node) => procSignal(node.dataset.pid, 'KILL'),
+    'proc-nice-up': (node) => procRenice(node.dataset.pid, (parseInt(node.dataset.nice, 10) || 0) + 1),
+    'proc-nice-down': (node) => procRenice(node.dataset.pid, (parseInt(node.dataset.nice, 10) || 0) - 1),
+    'layout-save': () => saveCurrentLayoutPrompt(),
     'ai-cmd-edit': (node) => aiCmdEdit(node.dataset.id),
     'ai-suggestion-run': (node) => aiRunSuggestion(node.dataset.id),
     'ai-save-config': () => saveAiConfig(),
@@ -2238,6 +2258,7 @@ function wireUIEvents() {
     bindChange('setting-haptics', (n) => { saveSettings({ haptics: n.checked }); buzz(20); });
     bindChange('setting-completion-notif', (n) => {
         saveSettings({ completionNotifications: n.checked });
+    bindChange('setting-health-push', (n) => { saveSettings({ healthPush: n.checked }); });
         if (n.checked && 'Notification' in window && Notification.permission !== 'granted') {
             Notification.requestPermission().catch(() => {});
         }
@@ -4602,4 +4623,306 @@ function openFilesAtShellCwd() {
     const drawer = $('files-drawer');
     if (drawer && !drawer.classList.contains('hidden')) loadFiles();
     else toggleFiles();
+}
+
+/* ═══════════════════ 5.2: health badges · editor · monitor · layouts · replay share ═══════════════════ */
+
+/* ── Per-tab process-health badge (server pushes 'tab-health' ctrl msgs) ── */
+function handleTabHealth(tab, ctrl) {
+    if (!tab || !ctrl) return;
+    const hot = ctrl.level === 'hot';
+    tab.health = hot ? ctrl : null;
+    if (tab.healthEl) {
+        tab.healthEl.classList.toggle('hidden', !hot);
+        tab.healthEl.textContent = hot ? ((ctrl.mins || 0) > 0 ? '⏳' : '🔥') : '';
+        tab.healthEl.title = hot ? `High usage — cpu ${ctrl.cpu}% · mem ${ctrl.rssMb} MB · running ${ctrl.mins} min` : '';
+    }
+    if (hot && document.hidden && getSettings().healthPush && typeof notifyUser === 'function') {
+        notifyUser(`Tab "${tab.title}" needs attention`, `cpu ${ctrl.cpu}% · mem ${ctrl.rssMb} MB · ${ctrl.mins} min running`, { tag: 'tab-health-' + tab.id });
+    }
+}
+
+/* ── In-browser file editor ── */
+const editorState = { path: null, mtime: null, dirty: false };
+function syncEditorDirty() {
+    const dot = $('editor-dirty');
+    if (dot) dot.classList.toggle('hidden', !editorState.dirty);
+}
+function bindEditorOnce() {
+    const area = $('editor-area');
+    if (!area || area.dataset.bound) return;
+    area.dataset.bound = '1';
+    area.addEventListener('input', () => { editorState.dirty = true; syncEditorDirty(); });
+    area.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); editorSave(false); }
+    });
+}
+async function openEditor(p) {
+    const modal = $('editor-modal');
+    if (!modal || !p) return;
+    try {
+        const data = await api('/api/files/content?path=' + encodeURIComponent(p));
+        if (data.binary) { showToast({ type: 'warn', title: 'Binary file', text: 'The editor handles text files only.' }); return; }
+        let mtime = null;
+        try { mtime = (await api('/api/files/stat?path=' + encodeURIComponent(p))).mtime || null; } catch (e) {}
+        editorState.path = p;
+        editorState.mtime = mtime;
+        editorState.dirty = false;
+        $('editor-path').textContent = p;
+        const area = $('editor-area');
+        area.value = data.content || '';
+        syncEditorDirty();
+        bindEditorOnce();
+        modal.classList.remove('hidden');
+        $('editor-status').textContent = `${data.size} bytes${data.truncated ? ' · showing first 512 KB' : ''} · Ctrl+S saves · backup .bak kept`;
+        setTimeout(() => area.focus(), 60);
+    } catch (e) {
+        showToast({ type: 'error', title: 'Cannot open file', text: String(e.message || e) });
+    }
+}
+async function editorSave(force) {
+    if (!editorState.path) return;
+    const area = $('editor-area');
+    try {
+        const res = await api('/api/files/write', {
+            method: 'POST',
+            body: { path: editorState.path, content: area.value, mtime: editorState.mtime, force: !!force }
+        });
+        editorState.mtime = res.mtime;
+        editorState.dirty = false;
+        syncEditorDirty();
+        $('editor-status').textContent = `Saved ${res.bytes} bytes${res.backup ? ' · backup: ' + res.backup.split('/').pop() : ''} · ${new Date().toLocaleTimeString()}`;
+        showToast({ type: 'success', title: 'Saved', text: editorState.path.split('/').pop(), duration: 1600, silent: true });
+        if (typeof loadFiles === 'function') loadFiles();
+    } catch (e) {
+        if (e.status === 409) {
+            const ok = await showConfirm({ title: 'File changed on disk', message: 'This file was modified after you opened it. Overwrite with your version?', okLabel: 'Overwrite', danger: true });
+            if (ok) editorSave(true);
+            return;
+        }
+        showToast({ type: 'error', title: 'Save failed', text: String(e.message || e) });
+    }
+}
+async function closeEditor() {
+    if (editorState.dirty) {
+        const ok = await showConfirm({ title: 'Discard changes?', message: 'The editor has unsaved changes. Close anyway?', okLabel: 'Discard', danger: true });
+        if (!ok) return;
+    }
+    const modal = $('editor-modal');
+    if (modal) modal.classList.add('hidden');
+    editorState.path = null;
+    editorState.dirty = false;
+}
+
+/* ── Monitor extras: 1 h sparklines + process manager ── */
+let monitorTick = 0;
+async function refreshMonitorExtras() {
+    if (!token || isViewerSession) return;
+    const drawer = $('stats-drawer');
+    if (!drawer || drawer.classList.contains('hidden')) return;
+    if (++monitorTick % 2 !== 0) return; // every other poll
+    try {
+        const hist = await api('/api/stats/history');
+        drawSparkRow(hist.ring || []);
+    } catch (e) {}
+    try {
+        const pr = await api('/api/processes');
+        renderProcList(pr.processes || []);
+    } catch (e) {}
+}
+function drawSpark(canvasId, vals, color, maxFixed) {
+    const cv = $(canvasId);
+    if (!cv || !cv.getContext) return;
+    const ctx = cv.getContext('2d');
+    const w = cv.width, h = cv.height;
+    ctx.clearRect(0, 0, w, h);
+    const nums = vals.filter((v) => typeof v === 'number' && !isNaN(v));
+    if (!nums.length) return;
+    const max = maxFixed || Math.max(1, ...nums);
+    ctx.beginPath();
+    const n = vals.length;
+    let started = false;
+    for (let i = 0; i < n; i++) {
+        const v = vals[i];
+        if (typeof v !== 'number' || isNaN(v)) { started = false; continue; }
+        const x = (i / Math.max(1, n - 1)) * (w - 2) + 1;
+        const y = h - 2 - (v / max) * (h - 6);
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+}
+function drawSparkRow(ring) {
+    const span = $('stat-hist-span');
+    if (span) span.textContent = ring.length ? `${ring.length} samples · ${Math.round((ring[ring.length - 1].t - ring[0].t) / 60000)} min` : '—';
+    const pad = (arr) => { const out = arr.slice(); return out; };
+    drawSpark('spark-cpu', pad(ring.map((r) => r.cpu)), '#3daee9', 100);
+    drawSpark('spark-mem', pad(ring.map((r) => r.mem)), '#9b59b6', 100);
+    drawSpark('spark-net', pad(ring.map((r) => (r.rx || 0) + (r.tx || 0))), '#2fd07a');
+    drawSpark('spark-disk', pad(ring.map((r) => r.disk)), '#f6a609', 100);
+}
+function fmtBytesShort(b) {
+    if (b >= 1048576) return (b / 1048576).toFixed(1) + 'M';
+    if (b >= 1024) return (b / 1024).toFixed(0) + 'K';
+    return String(b);
+}
+function renderProcList(rows) {
+    const list = $('proc-list');
+    const count = $('proc-count');
+    if (!list) return;
+    if (count) count.textContent = `${rows.length} top`;
+    if (!rows.length) { list.innerHTML = '<div class="setting-subtitle">No processes visible.</div>'; return; }
+    list.innerHTML = rows.slice(0, 14).map((p) => `
+        <div class="proc-row" title="${escHtml(p.cmd)}">
+            <span class="proc-pid">${p.pid}</span>
+            <span class="proc-name">${escHtml(p.comm)}</span>
+            <span class="proc-num">${p.cpu.toFixed(0)}%</span>
+            <span class="proc-num">${p.rssMb.toFixed(0)}M</span>
+            <span class="proc-num proc-nice" title="nice ${p.nice}">n${p.nice}</span>
+            <span class="proc-btns">
+                <button class="btn-mini" data-action="proc-nice-down" data-pid="${p.pid}" data-nice="${p.nice}" title="Raise priority (nice -1)">↑</button>
+                <button class="btn-mini" data-action="proc-nice-up" data-pid="${p.pid}" data-nice="${p.nice}" title="Lower priority (nice +1)">↓</button>
+                <button class="btn-mini" data-action="proc-kill" data-pid="${p.pid}" title="Send SIGTERM">stop</button>
+                <button class="btn-mini danger-mini" data-action="proc-kill9" data-pid="${p.pid}" title="Send SIGKILL">kill</button>
+            </span>
+        </div>`).join('');
+}
+async function procSignal(pid, signal) {
+    if (signal === 'KILL') {
+        const ok = await showConfirm({ title: 'SIGKILL process ' + pid + '?', message: 'SIGKILL cannot be caught or ignored — data may be lost.', okLabel: 'SIGKILL', danger: true });
+        if (!ok) return;
+    }
+    try {
+        await api('/api/processes/kill', { method: 'POST', body: { pid: Number(pid), signal } });
+        showToast({ type: 'success', title: signal + ' sent', text: 'pid ' + pid, duration: 1500, silent: true });
+        refreshMonitorExtras();
+    } catch (e) { showToast({ type: 'error', title: 'Signal failed', text: String(e.message || e) }); }
+}
+async function procRenice(pid, value) {
+    try {
+        await api('/api/processes/nice', { method: 'POST', body: { pid: Number(pid), value } });
+        refreshMonitorExtras();
+    } catch (e) { showToast({ type: 'error', title: 'renice failed', text: String(e.message || e) }); }
+}
+
+/* ── Saved workspace layouts (server-side → restore on any device) ── */
+let layoutsCache = [];
+async function refreshLayoutsCache() {
+    try { layoutsCache = (await api('/api/layouts')).layouts || []; } catch (e) { layoutsCache = []; }
+    return layoutsCache;
+}
+async function saveCurrentLayout(name) {
+    const ids = Object.keys(tabs);
+    if (!ids.length) { showToast({ type: 'warn', title: 'No tabs to save' }); return; }
+    try {
+        const res = await api('/api/layouts', {
+            method: 'POST',
+            body: {
+                name,
+                tabs: ids.map((id) => ({ tabId: id, title: tabs[id].title, color: tabs[id].color || (tabs[id].colorDot && tabs[id].colorDot.style.background) || '' })),
+                split: splitState && splitState.mode ? { mode: splitState.mode, focus: splitState.focus } : null,
+                active: Math.max(0, ids.indexOf(activeTabId))
+            }
+        });
+        await refreshLayoutsCache();
+        showToast({ type: 'success', title: 'Layout saved', text: `"${res.layout.name}" — ${res.layout.tabs.length} tab(s), restore from any device via the palette`, duration: 4000 });
+    } catch (e) { showToast({ type: 'error', title: 'Save failed', text: String(e.message || e) }); }
+}
+async function saveCurrentLayoutPrompt() {
+    const name = await showPrompt({ title: 'Save layout', message: 'Name this arrangement (tabs, splits, colors, working dirs):', value: 'my layout', okLabel: 'Save' });
+    if (!name || !name.trim()) return;
+    saveCurrentLayout(name.trim());
+}
+async function restoreLayout(layout) {
+    if (!layout || !Array.isArray(layout.tabs) || !layout.tabs.length) return;
+    const created = [];
+    for (const entry of layout.tabs) {
+        const id = createNewTab(entry.tabId, entry.title, entry.color ? { color: entry.color } : null);
+        if (id) {
+            created.push(id);
+            const t = tabs[id];
+            if (t && entry.color) {
+                t.color = entry.color;
+                if (t.colorDot) { t.colorDot.classList.remove('hidden'); t.colorDot.style.background = entry.color; t.colorDot.style.color = entry.color; }
+            }
+        }
+    }
+    for (let i = 0; i < layout.tabs.length; i++) {
+        const entry = layout.tabs[i];
+        const t = tabs[created[i]];
+        if (!t || !entry.cwd || entry.alive) continue; // reconnecting shells keep their cwd
+        for (let w = 0; w < 25 && !t.wsConnected; w++) await new Promise((r) => setTimeout(r, 100));
+        if (t.wsConnected && typeof sendInput === 'function') {
+            sendInput(t, `cd '${String(entry.cwd).replace(/'/g, "'\\''")}'\n`);
+        }
+    }
+    if (layout.split && created.length >= 2 && typeof applySplitLayout === 'function') {
+        if (typeof startSplit === 'function' && !splitState.mode) startSplit(layout.split.mode, created[0]);
+        splitState.mode = layout.split.mode;
+        splitState.tabs = [created[0], created[1]];
+        splitState.focus = layout.split.focus === 1 ? 1 : 0;
+        applySplitLayout();
+    }
+    if (created[layout.active || 0]) switchTab(created[layout.active || 0]);
+    showToast({ type: 'success', title: 'Layout restored', text: layout.name, duration: 2500, silent: true });
+}
+async function offerLayoutRestore() {
+    if (isViewerSession || !token) return;
+    const layouts = await refreshLayoutsCache();
+    if (!layouts.length) return;
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem(K.tabs) || '[]'); } catch (e) {}
+    if (Array.isArray(stored) && stored.length) return; // existing device keeps its own tabs
+    const latest = layouts.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+    const ok = await showConfirm({
+        title: 'Restore saved layout?',
+        message: `"${latest.name}" — ${latest.tabs.length} tab(s)${latest.split ? ' + split' : ''}. Restore this workspace on this device?`,
+        okLabel: 'Restore'
+    });
+    if (ok) restoreLayout(latest);
+}
+async function deleteLayout(id) {
+    try {
+        await api('/api/layouts/' + encodeURIComponent(id), { method: 'DELETE' });
+        await refreshLayoutsCache();
+        showToast({ type: 'success', title: 'Layout deleted', duration: 1600, silent: true });
+    } catch (e) { showToast({ type: 'error', title: 'Delete failed', text: String(e.message || e) }); }
+}
+
+/* ── Replay: share link + .cast export ── */
+function currentReplayRec() {
+    if (replayState && replayState.chunks && replayState.chunks.length) {
+        return { title: ($('replay-title') || {}).textContent || 'Terminal replay', chunks: replayState.chunks };
+    }
+    const rec = typeof getLatestRecording === 'function' ? getLatestRecording() : null;
+    return rec && rec.chunks && rec.chunks.length ? rec : null;
+}
+async function shareReplayLink() {
+    const rec = currentReplayRec();
+    if (!rec) { showToast({ type: 'warn', title: 'Nothing to share', text: 'Open a replay or record the tab first.' }); return; }
+    try {
+        const res = await api('/api/replay/share', {
+            method: 'POST',
+            body: { title: String(rec.title).replace(/^Replay — /, ''), events: rec.chunks.map((c) => ({ t: c.t, d: c.d })) }
+        });
+        const url = location.origin + res.url;
+        try { await navigator.clipboard.writeText(url); } catch (e) {}
+        showToast({ type: 'success', title: 'Replay link copied (24 h)', text: url, duration: 7000 });
+    } catch (e) { showToast({ type: 'error', title: 'Share failed', text: String(e.message || e) }); }
+}
+function downloadReplayCast() {
+    const rec = currentReplayRec();
+    if (!rec) { showToast({ type: 'warn', title: 'Nothing to export' }); return; }
+    const header = { version: 2, width: 100, height: 30, timestamp: Math.floor(Date.now() / 1000), title: rec.title, env: { SHELL: 'sh', TERM: 'xterm-256color' } };
+    const lines = [JSON.stringify(header)];
+    for (const c of rec.chunks) lines.push(JSON.stringify([Math.round((c.t / 1000) * 1000000) / 1000000, 'o', c.d]));
+    const blob = new Blob([lines.join('\n')], { type: 'application/x-asciicast' });
+    const a = el('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = String(rec.title).replace(/[^\w-]+/g, '_').slice(0, 40) + '.cast';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 400);
+    showToast({ type: 'success', title: 'asciicast exported', text: a.download });
 }

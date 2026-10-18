@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-    <link rel="stylesheet" href="style.css?v=5.1.7" />
+    <link rel="stylesheet" href="style.css?v=5.2.0" />
 </head>
 <body>
 
@@ -279,6 +279,19 @@
                 <div class="stat-block" id="stat-disk-block">
                     <div class="stat-row-head"><span>Disk</span><span id="stat-disk-text">—</span></div>
                     <div class="meter"><div class="meter-fill meter-disk" id="stat-disk-bar" style="width:0%"></div></div>
+                </div>
+                <div class="stat-block">
+                    <div class="stat-row-head"><span>Last hour</span><span id="stat-hist-span">—</span></div>
+                    <div class="spark-row">
+                        <div class="spark-cell"><canvas id="spark-cpu" width="150" height="34"></canvas><span>CPU</span></div>
+                        <div class="spark-cell"><canvas id="spark-mem" width="150" height="34"></canvas><span>MEM</span></div>
+                        <div class="spark-cell"><canvas id="spark-net" width="150" height="34"></canvas><span>NET</span></div>
+                        <div class="spark-cell"><canvas id="spark-disk" width="150" height="34"></canvas><span>DISK</span></div>
+                    </div>
+                </div>
+                <div class="stat-block">
+                    <div class="stat-row-head"><span>Processes</span><span id="proc-count">—</span></div>
+                    <div id="proc-list" class="proc-list"><div class="setting-subtitle">Open the monitor to sample processes…</div></div>
                 </div>
                 <div class="stat-grid">
                     <div class="stat-card"><span class="stat-label">Load avg</span><span class="stat-value" id="stat-load">—</span></div>
@@ -718,6 +731,15 @@
                     <div class="setting-row-actions">
                         <button class="btn-mini" data-action="notif-test">Test</button>
                         <label class="toggle-switch"><input type="checkbox" id="setting-completion-notif" /><span class="toggle-track"></span></label>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-meta">
+                        <span class="setting-title">Tab health alerts</span>
+                        <span class="setting-subtitle">Push a notification when a tab's process tree spikes (CPU / memory / long-running command). The 🔥 tab badge always shows.</span>
+                    </div>
+                    <div class="setting-row-actions">
+                        <label class="toggle-switch"><input type="checkbox" id="setting-health-push" /><span class="toggle-track"></span></label>
                     </div>
                 </div>
                 <div class="setting-row">
@@ -1215,6 +1237,8 @@
         <div class="modal-header">
             <h3><svg class="ic"><use href="#i-record"></use></svg> <span id="replay-title">Session Replay</span></h3>
             <div class="drawer-header-actions">
+                <button class="icon-btn" data-action="replay-share" title="Share as a public link (24 h)"><svg class="ic"><use href="#i-ext-link"></use></svg></button>
+                <button class="icon-btn" data-action="replay-cast" title="Download .cast (asciinema format)"><svg class="ic"><use href="#i-save"></use></svg></button>
                 <button class="icon-btn" data-action="replay-export" title="Export recording (.jsonl)"><svg class="ic"><use href="#i-download"></use></svg></button>
                 <button class="icon-btn" data-action="replay-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
             </div>
@@ -1234,6 +1258,30 @@
                     <option value="8">8×</option>
                     <option value="16">16×</option>
                 </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- File Editor (5.2) -->
+<div id="editor-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="editor-close"></div>
+    <div class="modal-sheet sheet-wide" role="dialog" aria-label="File editor">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-edit"></use></svg> <span id="editor-path" class="ellipsis">—</span><span id="editor-dirty" class="editor-dirty hidden" title="Unsaved changes">●</span></h3>
+            <div class="drawer-header-actions">
+                <button class="icon-btn" data-action="editor-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+            </div>
+        </div>
+        <div class="modal-body editor-body">
+            <textarea id="editor-area" spellcheck="false" placeholder="Loading…" aria-label="File content"></textarea>
+        </div>
+        <div class="modal-footer">
+            <span id="editor-status" class="setting-subtitle">—</span>
+            <div class="share-actions">
+                <button class="btn-ghost" data-action="editor-close">Close</button>
+                <button class="btn-primary" data-action="editor-save">💾 Save</button>
             </div>
         </div>
     </div>
@@ -1365,7 +1413,7 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
-<script src="app.js?v=5.1.7"></script>
-<script src="ui.js?v=5.1.7"></script>
+<script src="app.js?v=5.2.0"></script>
+<script src="ui.js?v=5.2.0"></script>
 </body>
 </html>

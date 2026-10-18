@@ -9,7 +9,7 @@ const WebSocket = require('ws');
 let serverProc = null;
 if (!process.env.BASE) {
     serverProc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-        env: Object.assign({}, process.env, { PORT: String(PORT), KONSOLE_TASK_REMIND_MS: process.env.KONSOLE_TASK_REMIND_MS || '3000' }),
+        env: Object.assign({}, process.env, { PORT: String(PORT), KONSOLE_TASK_REMIND_MS: process.env.KONSOLE_TASK_REMIND_MS || '3000', GK_HEALTH_CPU: process.env.GK_HEALTH_CPU || '30', GK_STATS_TICK_MS: process.env.GK_STATS_TICK_MS || '2000' }),
         stdio: ['ignore', 'pipe', 'pipe']
     });
     serverProc.stdout.on('data', () => {});
@@ -727,6 +727,106 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     host.ws.close();
     host2.ws.close();
     await sleep(200);
+
+
+    /* ── 5.2: layouts, file editor, process manager, stats history, replay share, tab health ── */
+    console.log('── 5.2: saved layouts CRUD ──');
+    const z52_JH = Object.assign({ 'Content-Type': 'application/json' }, H);
+    const z52_l1 = await j(`${B}/api/layouts`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ name: 'Test Layout', tabs: [{ tabId: 't1', title: 'web', color: '#ff0000' }], split: { mode: 'v', focus: 0 }, active: 0 }) });
+    check('layout save returns enriched snapshot', z52_l1.status === 200 && z52_l1.body.layout && z52_l1.body.layout.id === 'test-layout' && Array.isArray(z52_l1.body.layout.tabs) && 'cwd' in z52_l1.body.layout.tabs[0]);
+    const z52_l2 = await j(`${B}/api/layouts`, { headers: H });
+    check('layout list contains saved layout', z52_l2.status === 200 && (z52_l2.body.layouts || []).some((l) => l.id === 'test-layout'));
+    const z52_l2b = await j(`${B}/api/layouts`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ name: '' }) });
+    check('layout save rejects empty name', z52_l2b.status === 400);
+    const z52_l3 = await j(`${B}/api/layouts/test-layout`, { method: 'DELETE', headers: H });
+    const z52_l4 = await j(`${B}/api/layouts`, { headers: H });
+    check('layout delete removes it', z52_l3.status === 200 && !(z52_l4.body.layouts || []).some((l) => l.id === 'test-layout'));
+
+    console.log('── 5.2: file editor write (atomic + .bak + conflict) ──');
+    const z52_w1 = await j(`${B}/api/files/write`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-edit-test.txt', content: 'hello v1' }) });
+    check('write creates a new file', z52_w1.status === 200 && z52_w1.body.success === true);
+    const z52_r1 = await j(`${B}/api/files/content?path=gk-edit-test.txt`, { headers: H });
+    check('written content reads back', z52_r1.body && z52_r1.body.content === 'hello v1');
+    const z52_w2 = await j(`${B}/api/files/write`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-edit-test.txt', content: 'hello v2' }) });
+    check('overwrite succeeds and reports backup', z52_w2.status === 200 && !!z52_w2.body.backup);
+    const z52_rb = await j(`${B}/api/files/content?path=gk-edit-test.txt.bak`, { headers: H });
+    check('.bak holds the previous generation', z52_rb.body && z52_rb.body.content === 'hello v1');
+    const z52_w3 = await j(`${B}/api/files/write`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-edit-test.txt', content: 'stale', mtime: 1 }) });
+    check('stale mtime → 409 conflict', z52_w3.status === 409);
+    const z52_w4 = await j(`${B}/api/files/write`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-edit-test.txt', content: 'forced', mtime: 1, force: true }) });
+    check('force overwrites a conflict', z52_w4.status === 200);
+    const z52_w5 = await j(`${B}/api/files/write`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: '/', content: 'x' }) });
+    check('protected path refused (403)', z52_w5.status === 403);
+    const z52_w6 = await j(`${B}/api/files/write`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-no-dir/x.txt', content: 'x' }) });
+    check('missing parent dir → 404', z52_w6.status === 404);
+    await j(`${B}/api/files/delete`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-edit-test.txt' }) });
+    await j(`${B}/api/files/delete`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-edit-test.txt.bak' }) });
+
+    console.log('── 5.2: process manager guards ──');
+    const z52_p1 = await j(`${B}/api/processes`, { headers: H });
+    check('process list returns rows', z52_p1.status === 200 && Array.isArray(z52_p1.body.processes) && z52_p1.body.processes.length > 0);
+    const z52_p2 = await j(`${B}/api/processes/kill`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ pid: 1 }) });
+    check('kill refuses pid 1', z52_p2.status === 403);
+    const z52_p3 = await j(`${B}/api/processes/kill`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ pid: process.pid }) });
+    check('kill refuses the server ancestor chain', z52_p3.status === 403);
+    const z52_p4 = await j(`${B}/api/processes/nice`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ pid: 1, value: 5 }) });
+    check('renice refuses pid 1', z52_p4.status === 403);
+    const z52_p4b = await j(`${B}/api/processes/nice`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ pid: 1234567, value: 5 }) });
+    check('renice refuses unknown pid', z52_p4b.status === 403);
+    const z52_sleeper = require('child_process').spawn('sleep', ['30'], { stdio: 'ignore' });
+    await sleep(400);
+    const z52_p5 = await j(`${B}/api/processes/kill`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ pid: z52_sleeper.pid, signal: 'TERM' }) });
+    check('kill terminates a real process', z52_p5.status === 200);
+    await sleep(400);
+    await new Promise((r) => { z52_sleeper.on('exit', r); setTimeout(r, 1500); }); // reap so /proc forgets it
+    const z52_p6 = await j(`${B}/api/processes/kill`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ pid: z52_sleeper.pid }) });
+    check('kill on a reaped pid refused', z52_p6.status === 403 || z52_p6.status === 404);
+
+    console.log('── 5.2: stats history + replay share ──');
+    const z52_h1 = await j(`${B}/api/stats/history`, { headers: H });
+    check('stats history ring served (authed)', z52_h1.status === 200 && Array.isArray(z52_h1.body.ring) && typeof z52_h1.body.tickMs === 'number');
+    const z52_rs = await j(`${B}/api/replay/share`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ title: 'demo', events: [{ t: 0, d: 'hello' }, { t: 100, d: ' world' }] }) });
+    check('replay share creates token + url', z52_rs.status === 200 && z52_rs.body.token && z52_rs.body.url.includes('/replay.html?r='));
+    const z52_rp = await j(`${B}/api/replay/${z52_rs.body.token}`);
+    check('replay readable WITHOUT auth (token = capability)', z52_rp.status === 200 && z52_rp.body.events.length === 2 && z52_rp.body.title === 'demo');
+    const z52_rq = await j(`${B}/api/replay/replay_deadbeefdeadbeef`);
+    check('unknown replay token → 404', z52_rq.status === 404);
+    const z52_rhtml = await fetch(`${B}/replay.html`);
+    check('public player page served', z52_rhtml.status === 200 && (await z52_rhtml.text()).includes('Garuda Konsole'));
+    const z52_rbad = await j(`${B}/api/replay/share`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ events: [{ t: 'x' }] }) });
+    check('bad event shape rejected', z52_rbad.status === 400);
+    const z52_rnoauth = await j(`${B}/api/replay/share`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ events: [{ t: 0, d: 'x' }] }) });
+    check('replay share requires auth', z52_rnoauth.status === 401 || z52_rnoauth.status === 403);
+
+    console.log('── 5.2: tab health badge push (busy loop → z52_hot → ctrl-c → ok) ──');
+    const z52_hws = await wsConnect(`?tabId=health1&auth=${TOK}&cols=80&rows=24`);
+    const z52_hinit = await waitCtrl(z52_hws.msgs, 'init', 4000);
+    check('health tab session starts', !!z52_hinit);
+    z52_hws.ws.send(JSON.stringify({ type: 'input', data: 'end=$((SECONDS+8)); while [ $SECONDS -lt $end ]; do :; done\n' })); // stub pty = pipes: no SIGINT from ^C, so spin with a self-terminating loop
+    // cursor-based wait: skip the initial ok transition, wait for a hot push
+    const waitHealth52 = (from, level, timeout) => new Promise((resolve) => {
+        const t0 = Date.now();
+        let cur = from;
+        const iv = setInterval(() => {
+            for (let i = cur; i < z52_hws.msgs.length; i++) {
+                const m = z52_hws.msgs[i];
+                if (m.charCodeAt(0) === 0) {
+                    try {
+                        const p = JSON.parse(m.slice(1));
+                        if (p.type === 'tab-health' && p.level === level) { clearInterval(iv); return resolve({ msg: p, at: i + 1 }); }
+                    } catch (e) {}
+                }
+            }
+            cur = z52_hws.msgs.length;
+            if (Date.now() - t0 > timeout) { clearInterval(iv); resolve(null); }
+        }, 100);
+    });
+    const z52_hot = await waitHealth52(z52_hws.msgs.length, 'hot', 25000);
+    check('busy loop triggers hot badge push', !!z52_hot && z52_hot.msg.tabId === 'health1' && z52_hot.msg.cpu >= 50, z52_hot ? JSON.stringify(z52_hot.msg) : 'no hot push');
+    const z52_ok = await waitHealth52(z52_hot ? z52_hot.at : 0, 'ok', 30000); // loop ends by itself → ok push
+    check('idle clears the badge (ok push)', !!z52_ok);
+    z52_hws.ws.close();
+    await sleep(300);
 
     console.log(`\n═══ RESULT: ${passed} passed, ${failed} failed ═══`);
     if (serverProc) serverProc.kill();

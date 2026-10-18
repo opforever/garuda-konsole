@@ -1231,6 +1231,64 @@ function visible(win, id) {
     check('clicking an enabled entry runs it and closes the menu',
         ev(win, `window.__ctx516`) === 1 && ev(win, `document.getElementById('context-menu').classList.contains('hidden')`));
 
+
+    /* ── 5.2: file editor, layouts, health badge, monitor, replay share ── */
+    console.log('── 5.2: in-browser file editor ──');
+    await ev(win, `api('/api/files/write', { method: 'POST', body: { path: 'gk-fe-edit.txt', content: 'line1\\nline2' } })`);
+    await ev(win, `openEditor('gk-fe-edit.txt')`);
+    await tick(500);
+    check('editor opens with file content',
+        ev(win, `!document.getElementById('editor-modal').classList.contains('hidden')`) &&
+        ev(win, `document.getElementById('editor-area').value`) === 'line1\nline2');
+    ev(win, `(() => { const a = document.getElementById('editor-area'); a.value += '\\nline3'; a.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    check('unsaved changes set the dirty dot', ev(win, `!document.getElementById('editor-dirty').classList.contains('hidden')`));
+    await ev(win, `editorSave(false)`);
+    await tick(400);
+    const saved52 = await ev(win, `api('/api/files/content?path=gk-fe-edit.txt').then((d) => d.content)`);
+    check('save persists to the server', saved52 === 'line1\nline2\nline3');
+    check('dirty dot clears after save', ev(win, `document.getElementById('editor-dirty').classList.contains('hidden')`));
+    await ev(win, `closeEditor()`);
+    await tick(150);
+    check('editor closes cleanly', ev(win, `document.getElementById('editor-modal').classList.contains('hidden')`));
+    await ev(win, `api('/api/files/delete', { method: 'POST', body: { path: 'gk-fe-edit.txt' } }).catch(() => {}); api('/api/files/delete', { method: 'POST', body: { path: 'gk-fe-edit.txt.bak' } }).catch(() => {})`);
+
+    console.log('── 5.2: saved workspace layouts ──');
+    const tabsBefore52 = ev(win, `Object.keys(tabs).length`);
+    ev(win, `createNewTab()`);
+    await tick(700);
+    check('second tab created for layout snapshot', ev(win, `Object.keys(tabs).length`) === tabsBefore52 + 1);
+    await ev(win, `saveCurrentLayout('fe layout')`);
+    await tick(400);
+    check('layout cached client-side', ev(win, `layoutsCache.some((l) => l.id === 'fe-layout')`));
+    check('layout persisted server-side', (await ev(win, `api('/api/layouts').then((d) => d.layouts.length)`)) >= 1);
+    check('palette offers restore + delete entries',
+        ev(win, `buildPaletteItems('restore layout').some((i) => /Restore layout: fe layout/.test(i.title))`) &&
+        ev(win, `buildPaletteItems('delete layout').some((i) => /Delete layout: fe layout/.test(i.title))`));
+    await ev(win, `deleteLayout('fe-layout')`);
+    await tick(300);
+    check('layout deletion propagates', ev(win, `!layoutsCache.some((l) => l.id === 'fe-layout')`));
+
+    console.log('── 5.2: tab health badge ──');
+    ev(win, `handleTabHealth(tabs[Object.keys(tabs)[0]], { type: 'tab-health', level: 'hot', cpu: 99, rssMb: 2048, mins: 0 })`);
+    check('hot push shows the fire badge', ev(win, `(() => { const t = tabs[Object.keys(tabs)[0]]; return !!t.healthEl && !t.healthEl.classList.contains('hidden') && t.healthEl.textContent === '🔥'; })()`));
+    ev(win, `handleTabHealth(tabs[Object.keys(tabs)[0]], { type: 'tab-health', level: 'hot', cpu: 10, rssMb: 100, mins: 12 })`);
+    check('long-running push shows the hourglass', ev(win, `(() => { const t = tabs[Object.keys(tabs)[0]]; return t.healthEl.textContent === '⏳'; })()`));
+    ev(win, `handleTabHealth(tabs[Object.keys(tabs)[0]], { type: 'tab-health', level: 'ok', cpu: 0, rssMb: 0, mins: 0 })`);
+    check('ok push hides the badge', ev(win, `(() => { const t = tabs[Object.keys(tabs)[0]]; return t.healthEl.classList.contains('hidden'); })()`));
+
+    console.log('── 5.2: monitor extras (sparklines + process list) ──');
+    ev(win, `document.getElementById('stats-drawer').classList.remove('hidden')`);
+    await ev(win, `refreshMonitorExtras()`);
+    await ev(win, `refreshMonitorExtras()`); // second call passes the throttle
+    await tick(600);
+    check('process list renders rows', ev(win, `document.querySelectorAll('#proc-list .proc-row').length`) > 0);
+    check('history span updated', ev(win, `document.getElementById('stat-hist-span').textContent`) !== '—');
+    ev(win, `document.getElementById('stats-drawer').classList.add('hidden')`);
+
+    console.log('── 5.2: replay share link ──');
+    const shareUrl52 = await ev(win, `api('/api/replay/share', { method: 'POST', body: { title: 'fe replay', events: [{ t: 0, d: 'x' }] } }).then((r) => r.url)`);
+    check('share returns a public player url', typeof shareUrl52 === 'string' && shareUrl52.indexOf('/replay.html?r=replay_') === 0);
+
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
     const relevant = fatalErrors.filter((e) => !/Could not load|favicon|Not implemented|blob:fake/i.test(e));

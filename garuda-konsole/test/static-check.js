@@ -146,6 +146,20 @@ if (crushStart === -1 || crushEnd === -1 || crushEnd < crushStart) {
     else ok('scrollable flex columns scroll instead of crushing children (5.1.7 section intact)');
 }
 
+/* 5d. 5.2 feature-surface guard */
+const replayHtmlPath = path.join(PUB, 'replay.html');
+const replayHtml = fs.existsSync(replayHtmlPath) ? fs.readFileSync(replayHtmlPath, 'utf8') : '';
+if (!replayHtml) fail('public/replay.html (standalone replay player) is missing');
+else if (!/api\/replay\//.test(replayHtml)) fail('replay player must fetch /api/replay/<token>');
+else ok('standalone replay player present');
+const srvjs = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const missingRoutes = ['/api/layouts', '/api/files/write', '/api/processes', '/api/stats/history', '/api/replay/share'].filter((r) => !srvjs.includes(r));
+if (missingRoutes.length) fail('server routes missing: ' + missingRoutes.join(', '));
+else ok('5.2 server routes present (layouts / write / processes / history / replay)');
+const missingFns = ['handleTabHealth', 'openEditor', 'restoreLayout', 'shareReplayLink', 'renderProcList'].filter((f) => !uijs.includes('function ' + f));
+if (missingFns.length) fail('ui.js missing 5.2 functions: ' + missingFns.join(', '));
+else ok('5.2 client functions present (badge / editor / layouts / replay / procs)');
+
 /* 6. Cross-file function references */
 console.log('═══ cross-file function check ═══');
 const definedFns = new Set();

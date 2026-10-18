@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Garuda Konsole — Replay</title>
+<meta name="robots" content="noindex" />
+<style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        background: #0b0e14; color: #e8edf4;
+        font: 14px/1.5 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        min-height: 100dvh; display: flex; flex-direction: column; align-items: center;
+        padding: 22px 14px;
+    }
+    .wrap { width: min(96vw, 980px); display: flex; flex-direction: column; gap: 12px; }
+    header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    header h1 { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+    header .badge {
+        font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+        color: #3daee9; background: rgba(61, 174, 233, .12); border: 1px solid rgba(61, 174, 233, .35);
+        padding: 2px 9px; border-radius: 10px;
+    }
+    header .meta { font-size: 11px; color: #7d8590; margin-left: auto; }
+    .controls {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        background: rgba(22, 27, 36, .8); border: 1px solid rgba(125, 145, 175, .18);
+        border-radius: 12px; padding: 8px 12px;
+    }
+    button {
+        background: rgba(61, 174, 233, .13); color: #3daee9; border: 1px solid rgba(61, 174, 233, .4);
+        border-radius: 8px; padding: 6px 13px; font: 700 12px/1 inherit; cursor: pointer;
+    }
+    button:hover { background: #3daee9; color: #08130c; }
+    input[type="range"] { flex: 1; min-width: 120px; accent-color: #3daee9; }
+    select { background: #161b24; color: #e8edf4; border: 1px solid rgba(125, 145, 175, .3); border-radius: 8px; padding: 5px 7px; font: 12px inherit; }
+    .time { font: 11px ui-monospace, Menlo, Consolas, monospace; color: #93a0b0; min-width: 92px; text-align: right; }
+    pre {
+        background: #080a0f; border: 1px solid rgba(125, 145, 175, .18); border-radius: 12px;
+        padding: 14px 16px; min-height: 320px; max-height: 62dvh; overflow: auto;
+        font: 12px/1.55 ui-monospace, 'Fira Code', Menlo, Consolas, monospace;
+        white-space: pre-wrap; word-break: break-word; color: #d5dbe5;
+    }
+    .err { color: #ff5566; font-size: 13px; padding: 18px; text-align: center; }
+    footer { font-size: 11px; color: #5d6a7a; text-align: center; }
+    footer a { color: #3daee9; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <header>
+        <h1 id="title">Loading replay…</h1>
+        <span class="badge">read-only</span>
+        <span class="meta" id="meta"></span>
+    </header>
+    <div class="controls">
+        <button id="play">▶ Play</button>
+        <button id="restart">↺</button>
+        <input type="range" id="scrub" min="0" max="1000" value="0" step="1" />
+        <select id="speed">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+            <option value="8">8×</option>
+        </select>
+        <span class="time" id="time">0:00 / 0:00</span>
+    </div>
+    <pre id="screen" aria-label="Replayed terminal output"></pre>
+    <footer>Shared from <a href="/">Garuda Konsole</a> · links expire after 24 h · content is view-only, no shell access</footer>
+</div>
+<script>
+'use strict';
+/* Minimal ANSI-stripped timeline player for Garuda Konsole replay shares.
+   Deliberately dependency-free: this page is public (the token IS the
+   capability) so it must not pull app code or CDNs. */
+const token = new URLSearchParams(location.search).get('r') || '';
+const $ = (id) => document.getElementById(id);
+const screenEl = $('screen');
+let chunks = [], total = 0, idx = 0, playing = false, timer = null, buffer = '';
+
+function stripAnsi(s) {
+    return String(s)
+        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+        .replace(/\x1b[()][0-9A-B]/g, '')
+        .replace(/\x1b[=>]/g, '')
+        .replace(/\r/g, '');
+}
+function fmt(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+function renderUpTo(t) {
+    buffer = '';
+    idx = 0;
+    for (const c of chunks) {
+        if (c.t > t) break;
+        buffer += stripAnsi(c.d);
+        idx++;
+    }
+    if (buffer.length > 200000) buffer = '…[trimmed]…\n' + buffer.slice(-180000);
+    screenEl.textContent = buffer;
+    screenEl.scrollTop = screenEl.scrollHeight;
+    $('scrub').value = total ? Math.round((t / total) * 1000) : 0;
+    $('time').textContent = fmt(t) + ' / ' + fmt(total);
+}
+function currentT() { return total ? (parseInt($('scrub').value, 10) / 1000) * total : 0; }
+function step() {
+    if (!playing) return;
+    const t = currentT();
+    const next = chunks[idx];
+    if (!next) { pause(); return; }
+    const delay = Math.max(8, (next.t - t) / parseFloat($('speed').value || '1'));
+    timer = setTimeout(() => {
+        buffer += stripAnsi(next.d);
+        if (buffer.length > 200000) buffer = '…[trimmed]…\n' + buffer.slice(-180000);
+        screenEl.textContent = buffer;
+        screenEl.scrollTop = screenEl.scrollHeight;
+        idx++;
+        $('scrub').value = total ? Math.round((next.t / total) * 1000) : 0;
+        $('time').textContent = fmt(next.t) + ' / ' + fmt(total);
+        step();
+    }, delay);
+}
+function play() {
+    if (playing) return;
+    if (idx >= chunks.length) renderUpTo(0);
+    playing = true;
+    $('play').textContent = ' Pause';
+    step();
+}
+function pause() {
+    playing = false;
+    if (timer) clearTimeout(timer);
+    $('play').textContent = '▶ Play';
+}
+$('play').addEventListener('click', () => (playing ? pause() : play()));
+$('restart').addEventListener('click', () => { pause(); renderUpTo(0); });
+$('scrub').addEventListener('input', () => { pause(); renderUpTo(currentT()); });
+$('speed').addEventListener('change', () => { if (playing) { pause(); play(); } });
+
+(async () => {
+    if (!token) {
+        $('title').textContent = 'No replay token';
+        screenEl.textContent = 'This page needs a ?r=<token> link from the Garuda Konsole replay share button.';
+        return;
+    }
+    try {
+        const res = await fetch('/api/replay/' + encodeURIComponent(token));
+        if (!res.ok) throw new Error(res.status === 404 ? 'This replay link has expired (24 h lifetime) or never existed.' : 'Server error ' + res.status);
+        const data = await res.json();
+        chunks = (data.events || []).slice().sort((a, b) => a.t - b.t);
+        total = chunks.length ? chunks[chunks.length - 1].t : 0;
+        document.title = data.title + ' — Garuda Konsole replay';
+        $('title').textContent = data.title;
+        $('meta').textContent = new Date(data.createdAt).toLocaleString() + ' · ' + chunks.length + ' frames';
+        renderUpTo(0);
+        setTimeout(play, 400);
+    } catch (e) {
+        $('title').textContent = 'Replay unavailable';
+        screenEl.innerHTML = '<span class="err"></span>';
+        screenEl.firstChild.textContent = String(e.message || e);
+    }
+})();
+</script>
+</body>
+</html>

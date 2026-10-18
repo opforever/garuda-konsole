@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.1.7';
+const APP_VERSION = '5.2.0';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS = {
     uiSounds: false,
     haptics: true,
     completionNotifications: true,
+    healthPush: false,
     bootAnim: true,
     reducedMotion: false,
     scrollSpeed: 4,
@@ -962,6 +963,7 @@ async function enterApp(silent) {
     startAutoThemeWatcher();
     if (typeof renderPinBar === 'function') renderPinBar();
     if (typeof showNewsIfNew === 'function') setTimeout(() => showNewsIfNew(), 1500);
+    if (typeof offerLayoutRestore === 'function') setTimeout(() => offerLayoutRestore(), 2200);
     if (typeof initFloatBall === 'function') setTimeout(() => initFloatBall(), 900);
     aiState.mode = ['chat', 'ask', 'auto'].includes(getSettings().aiMode) ? getSettings().aiMode : 'ask';
     if (typeof syncAiModeUI === 'function') syncAiModeUI();
@@ -1075,6 +1077,7 @@ function createNewTab(existingId, existingTitle, profile) {
         colorDot.style.color = prof.color;
     }
     const activityEl = el('span', 'tab-activity hidden');
+    const healthEl = el('span', 'tab-health hidden');   // 5.2: 🔥 process-health badge
     const titleEl = el('span', 'tab-title');
     const initialTitle = existingTitle || (prof && prof.name) || `${(prof && prof.shell) || serverMeta.shell || 'shell'} ${Object.keys(tabs).length + 1}`;
     titleEl.textContent = initialTitle;
@@ -1082,7 +1085,7 @@ function createNewTab(existingId, existingTitle, profile) {
     const closeBtn = el('button', 'close-tab-btn', '×');
     closeBtn.title = 'Close tab';
     closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeTab(tabId); });
-    tabEl.append(colorDot, activityEl, titleEl, closeBtn);
+    tabEl.append(colorDot, activityEl, titleEl, healthEl, closeBtn);
     tabEl.addEventListener('click', (e) => {
         if (e.target && e.target.classList && e.target.classList.contains('tab-rename-input')) return;
         switchTab(tabId);
@@ -1124,7 +1127,7 @@ function createNewTab(existingId, existingTitle, profile) {
     const tab = {
         id: tabId,
         title: initialTitle,
-        tabEl, titleEl, activityEl, termEl, colorDot,
+        tabEl, titleEl, activityEl, healthEl, termEl, colorDot,
         term, fitAddon, searchAddon, webLinksAddon,
         ws: null,
         wsConnected: false,
@@ -1918,6 +1921,10 @@ function handleHostCtrl(tab, ctrl) {
         }
         case 'notify': {
             handleServerNotify(ctrl);
+            break;
+        }
+        case 'tab-health': {
+            if (typeof handleTabHealth === 'function') handleTabHealth(tab, ctrl);
             break;
         }
         case 'pong': {
