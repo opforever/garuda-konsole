@@ -132,6 +132,20 @@ if (!html.includes('style.css?v=' + pkgVersion) || !html.includes('app.js?v=' + 
     ok('asset URLs version-busted in lockstep with package version (stale-SW trap closed)');
 }
 
+/* 5c. 5.1.7 scroll-crush guard: scrollable flex columns must never compress children */
+const crushStart = css.indexOf('SCROLL-CRUSH:START');
+const crushEnd = css.indexOf('SCROLL-CRUSH:END');
+if (crushStart === -1 || crushEnd === -1 || crushEnd < crushStart) {
+    fail('scroll-crush section missing in style.css (SCROLL-CRUSH:START/END markers)');
+} else {
+    const seg = css.slice(crushStart, crushEnd);
+    const needCrush = ['.ai-messages > *', '.chat-messages > *', '.drawer-body > *', '.server-sessions-list > *'];
+    const missCrush = needCrush.filter((s) => !seg.includes(s));
+    if (missCrush.length) fail('scroll-crush section must protect: ' + missCrush.join(', '));
+    else if (!/flex-shrink:\s*0/.test(seg) || !/\.ai-cmd-card\s*{\s*flex-shrink:\s*0;\s*}/.test(seg)) fail('scroll-crush section lost its flex-shrink: 0 guarantees');
+    else ok('scrollable flex columns scroll instead of crushing children (5.1.7 section intact)');
+}
+
 /* 6. Cross-file function references */
 console.log('═══ cross-file function check ═══');
 const definedFns = new Set();

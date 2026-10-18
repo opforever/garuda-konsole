@@ -1,8 +1,8 @@
-# Garuda Konsole 5.1.6 🦅
+# Garuda Konsole 5.1.7 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.1.6-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-388%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.1.7-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-388%20passing-2fd07a)
 
 ---
 
@@ -210,6 +210,18 @@ Without build tools for node-pty, run `./test/setup-sandbox.sh` first (swaps in 
 - **AI Guide keys never reach the browser** — the server proxies Groq, validates messages, rate-limits (30/min/IP) and sanitizes model ids (no traversal). Destructive shell patterns always require explicit confirmation, in every mode.
 - File APIs guard path traversal, refuse to delete protected system paths, and only whitelisted shells can be spawned via profiles.
 - `server.js` and `package.json` are **not** web-accessible.
+
+## 🩹 What's new in 5.1.7 — approval buttons can't hide anymore (scroll, never crush)
+
+Real-world bug report: *"the second approval card gives no Run/Edit/Skip buttons at 100% zoom — at 90% zoom they appear; ctrl+ / ctrl− zoom breaks things visible on the page."*
+
+Root cause: `.ai-messages` (and `.chat-messages`, `.drawer-body`, `.server-sessions-list`) are **scrollable flex columns**, but their children kept the default `flex-shrink: 1`. The moment a conversation grew taller than the pane, the browser **compressed the children** instead of scrolling — and because `.ai-cmd-card` clips with `overflow: hidden`, a squeezed approval card lost exactly its action row. The buttons were always in the DOM; zooming out made everything fit again, which is why 90% "fixed" it and 100% hid them.
+
+- **Children of scrollable flex columns are now `flex-shrink: 0`** — the pane scrolls instead of squashing its content, at every zoom level and viewport size (this is also why ctrl+/− appeared to "break" panels: each zoom level produced a different crush).
+- Approval cards carry an explicit extra `flex-shrink: 0` guard for any nested flex context.
+- Guarded by a static check (`SCROLL-CRUSH:START/END`), and verified in headless Chromium at 560/640/900px-tall viewports: the pre-fix build crushes the pending card (83px of content in a 77px box, pane never scrolls); the fixed build keeps the card intact and the pane scrolls.
+
+Usual version lockstep: asset URLs `?v=5.1.7`, SW cache `garuda-konsole-v5.1.7`, package/server/APP_VERSION, README.
 
 ## 🎨 What's new in 5.1.6 — the right-click menu finally looks clickable
 

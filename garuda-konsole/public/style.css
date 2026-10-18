@@ -3256,3 +3256,24 @@ button:disabled:active,
 .ctx-item.danger { color: var(--danger); }
 .ctx-item .ctx-key { color: var(--text-dim); }
 /* CTX-AFFORDANCE:END */
+
+/* ═══════ 5.1.7 — Scroll containers must scroll, never crush ═══════
+   SCROLL-CRUSH:START
+   User report: approval-card buttons (Run/Edit/Explain/Skip) "disappear"
+   on the second approval at 100% zoom, reappear at 90%; ctrl+/ctrl- zoom
+   "breaks things visible on the page".
+   Root cause: .ai-messages / .chat-messages / .drawer-body /
+   .server-sessions-list are scrollable FLEX COLUMNS, but their children
+   kept the default flex-shrink:1. When content overflowed, the browser
+   COMPRESSED the children instead of letting the container scroll — and
+   .ai-cmd-card's overflow:hidden then clipped the card's own action row
+   (the buttons were always in the DOM, just squeezed out of the card box;
+   zooming out made everything fit again, which is why 90% "fixed" it).
+   Fix: direct children of scrollable flex columns never shrink — the
+   container scrolls instead, at every zoom level and viewport size. */
+.ai-messages > *,
+.chat-messages > *,
+.drawer-body > *,
+.server-sessions-list > * { flex-shrink: 0; }
+.ai-cmd-card { flex-shrink: 0; } /* belt & braces: approval cards keep their action row in any nested flex context */
+/* SCROLL-CRUSH:END */
