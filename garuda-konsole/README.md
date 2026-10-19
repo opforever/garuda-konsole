@@ -466,6 +466,11 @@ Test totals: API **140**, frontend **223**, static checks clean.
     They are re-downloaded per session by `sh tools/browser-env.sh`
     (~3-4 min, hands-off) into `/tmp/.cache/ms-playwright`.
   So at session start: `sh test/setup-sandbox.sh && sh tools/browser-env.sh`.
+- **The workspace snapshot can drop `.git`** (it did once, mid-project).
+  Symptom: `git status` → "not a git repository" while all files are present.
+  Recovery: `git clone <repo> /tmp/x && cp -r /tmp/x/.git <workspace-repo-root>/`,
+  then re-set `git config user.name/user.email` (a restored .git from a fresh
+  clone has no local identity) and commit/push as usual.
 - **Path-literal remap quirk (biggest trap).** The tool layer rewrites
   `/home/user` literals inside *bash command text* to the real tenant mount
   (a `/tmp/arena/tenants/…/workspace` path), but does **not** rewrite file
