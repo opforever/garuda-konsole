@@ -34,4 +34,10 @@ if [ ! -d /tmp/.cache/ms-playwright ]; then
 else
     echo "chromium: already cached in /tmp/.cache/ms-playwright"
 fi
+# system libraries for the headless shell (missing on fresh sandboxes)
+if ! node -e "process.exit(0)" 2>/dev/null; then :; fi
+if [ ! -e /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0 ] && ! ldconfig -p 2>/dev/null | grep -q libglib-2.0; then
+    echo "installing chromium system dependencies…"
+    (cd "$(dirname "$PW")/.." && npx --yes playwright-core install-deps chromium) >/dev/null 2>&1 || echo "  (install-deps failed — try: npx playwright-core install-deps chromium)"
+fi
 echo "browser env ready"

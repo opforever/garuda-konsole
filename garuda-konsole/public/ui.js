@@ -1022,7 +1022,7 @@ async function openPreviewStudio(path, entryOpt) {
             const buf = await pvFetchBytes(path);
             const host = pvDyn('div', 'pv-docx');
             const lib = window.docxPreview || window.docx;
-            await lib.renderAsync(buf, host, {}, { inWrapper: false, ignoreWidth: false, breakPages: true });
+            await lib.renderAsync(buf, host); // 0.3.3 UMD crashes with extra args; wrapper styled via CSS
         } catch (e) { pvNote('docx render failed: ' + (e.message || e), '#i-alert'); }
         return;
     }
@@ -1059,7 +1059,7 @@ async function openPreviewStudio(path, entryOpt) {
         if (typeof window.fflate === 'undefined') { pvNote('Zip renderer not loaded (offline?) — use Download.', '#i-alert'); return; }
         try {
             const buf = await pvFetchBytes(path);
-            const entries = await window.fflate.unzip(new Uint8Array(buf));
+            const entries = window.fflate.unzipSync(new Uint8Array(buf)); // UMD unzip() is callback-style
             const list = pvDyn('div', 'pv-ziplist');
             const names = Object.keys(entries).sort();
             names.slice(0, 400).forEach((n) => {

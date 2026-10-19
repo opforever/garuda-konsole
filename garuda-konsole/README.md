@@ -1,8 +1,8 @@
-# Garuda Konsole 5.4.0 🦅
+# Garuda Konsole 5.4.1 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.4.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-469%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.4.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-469%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,28 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 🔬 What's new in 5.4.1 — rigor-pass fixes (real-browser auditing)
+
+A dedicated adversarial harness (`tools/verify-rigorous.js`, 33 checks:
+real generated xlsx/docx/zip, corrupt files, 3 MB binaries, empty files,
+unicode/space names, decode-level media assertions, SW reload hygiene,
+session persistence, console-error accounting) caught four real defects
+the unit suites couldn't see, all fixed here:
+
+- **docx-preview ships no CSS file** — the `<link>` I added 404'd on every
+  reload (and poisoned SW precache); removed. docx-preview injects its own
+  styles; the wrapper is themed via CSS instead.
+- **docx-preview 0.3.3's `renderAsync` crashes with a 3rd/4th argument** —
+  studio now calls the 2-arg form.
+- **docx-preview needs a global JSZip** — added to index.html + SW shell.
+- **fflate's UMD `unzip()` is callback-style** ("no callback" error) —
+  studio uses `unzipSync`.
+- `browser-env.sh` now also installs Chromium's system libs on fresh
+  sandboxes; frontend recordings-palette check made deterministic.
+
+Suite: API 188, frontend 281, statics; rigorous 33/33; preview 24/24;
+rd 8/8; features-52 12/12.
 
 ## 👁️ What's new in 5.4.0 — Preview Studio: every openable file, in the page
 

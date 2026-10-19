@@ -1301,6 +1301,7 @@ function visible(win, id) {
     const recList521 = await ev(win, `api('/api/recordings').then((d) => d.recordings)`);
     check('stopping a recording auto-saves server-side', Array.isArray(recList521) && recList521.length >= 1, JSON.stringify(recList521 || []).slice(0, 80));
     const recName521 = recList521 && recList521[0] ? recList521[0].name : null;
+    await ev(win, `refreshRecordingsCache()`); // what opening the palette does
     check('palette offers play + delete entries', !!recName521 &&
         ev(win, `buildPaletteItems('play recording').some((i) => /Play recording:/.test(i.title))`) &&
         ev(win, `buildPaletteItems('delete recording').some((i) => /Delete recording:/.test(i.title))`));
