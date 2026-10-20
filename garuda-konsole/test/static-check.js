@@ -179,6 +179,22 @@ if (!/sbx-del/.test(uijs)) fail('ui.js must render sandbox deletions with the sb
 else if (!/\.sbx-del\s*\{/.test(css)) fail('style.css must define .sbx-del');
 else ok('sandbox deletion rendering present (ui.js + style.css)');
 
+/* 5f. 5.6 Garuda Pet + Mission Control guards */
+if (!srvjs.includes("app.get('/api/today'")) fail('server missing the /api/today journal endpoint');
+else if ((srvjs.match(/journalAdd\(/g) || []).length < 12) fail('day journal must be wired into ≥12 server event points');
+else if (!/GK_TODAY_DIR/.test(srvjs)) fail('journal dir must be overridable via GK_TODAY_DIR (test isolation)');
+else ok('day journal: endpoints + ≥12 server event hooks + isolated dir override (5.6)');
+const moodCount = (uijs.match(/\npetM\(/g) || []).length;
+if (moodCount < 100) fail(`pet mood catalog must have ≥100 moods (found ${moodCount})`);
+else if (!/function petResolveMood\(/.test(uijs)) fail('pet mood resolver missing');
+else if (!/petEvent\(status === 0 \? 'cmd-ok' : 'cmd-fail'/.test(appjs)) fail('OSC-133 exit must feed petEvent cmd-fail');
+else if (!/todayJournal\('cmd'/.test(appjs)) fail('OSC-133 exit must journal to /api/today/event');
+else ok(`Garuda Pet: ${moodCount} moods + pure resolver + OSC-133 hooks (5.6)`);
+if (!html.includes('id="pet-root"') || !html.includes('id="today-modal"')) fail('index.html missing pet-root / today-modal markup');
+else if (!/data-action="today-open"/.test(html)) fail('status bar clock must open Mission Control (data-action="today-open")');
+else if (!/\.td-dot/.test(css) || !/\.pet-bubble/.test(css)) fail('style.css missing pet/today sections');
+else ok('pet + Mission Control markup, actions and styles present');
+
 /* 6. Cross-file function references */
 console.log('═══ cross-file function check ═══');
 const definedFns = new Set();

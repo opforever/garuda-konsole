@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.5.1';
+const VERSION = '5.6.0';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -277,7 +277,12 @@ fs.mkdirSync(TEMP_UPLOAD_DIR, { recursive: true });
 
 function getSessionCwd(session) {
     try {
-        if (session && session.alive && session.ptyProcess && session.ptyProcess.pid) {
+        /* 5.6: the pty child chdir's AFTER fork returns — reading /proc/<pid>/cwd
+           synchronously right after spawn races it and reports the SERVER's cwd.
+           For a brief grace window after each spawn, session.lastCwd (the exact
+           dir we asked node-pty for) is authoritative; /proc tracking resumes
+           after. Fixes profile-tab cwd flakiness under load. */
+        if (session && session.alive && session.ptyProcess && session.ptyProcess.pid && Date.now() >= (session.cwdProbeAt || 0)) {
             return fs.readlinkSync(`/proc/${session.ptyProcess.pid}/cwd`);
         }
     } catch (e) { /* fall through */ }
@@ -364,6 +369,7 @@ function spawnPtyFor(session, cols, rows) {
 
     session.ptyProcess = ptyProcess;
     session.alive = true;
+    session.cwdProbeAt = Date.now() + 750; // chdir-race grace window (see getSessionCwd)
     session.exitInfo = null;
     session.lastActivity = Date.now();
     try { session.lastCwd = cwd; } catch (e) {}
@@ -386,6 +392,7 @@ function spawnPtyFor(session, cols, rows) {
         broadcastPresence(session.tabId);
         if (session.clients.size === 0) {
             pushNotify('Shell exited', `Session "${session.tabId}" ended (code ${session.exitInfo.exitCode}). It will revive when you return.`, 'exit:' + session.tabId).catch(() => {});
+            journalAdd('shell', 'exit', `Session ${session.tabId} ended`, { tabId: session.tabId, exitCode: session.exitInfo ? session.exitInfo.exitCode : null });
         }
     });
 
@@ -489,6 +496,7 @@ app.post('/api/login', (req, res) => {
         return res.status(401).json({ error: 'Incorrect password' });
     }
     const token = issueToken(ip);
+    journalAdd('auth', 'login', 'Web login', { ip });
     try {
         res.cookie('gk_session', token, {
             httpOnly: true,
@@ -1226,6 +1234,7 @@ app.post('/api/fileshare/create', requireAuth, (req, res) => {
     purgeFileShares();
     const token = 'fshare_' + crypto.randomBytes(10).toString('hex');
     fileShares.set(token, { token, path: target, mode, createdAt: Date.now(), expiresAt: Date.now() + hours * 3600 * 1000, maxViews, views: 0 });
+    journalAdd('share', 'create', path.basename(target), { mode, hours, maxViews });
     res.json({ success: true, token, mode, hours, maxViews, url: '/fs.html?r=' + token, expiresAt: fileShares.get(token).expiresAt });
 });
 app.get('/api/fileshare/list', requireAuth, (req, res) => {
@@ -1265,6 +1274,118 @@ app.get('/api/fileshare/:token/download', (req, res) => {
     if (!f) return;
     f.views++;
     res.download(f.path, path.basename(f.path));
+});
+
+/* ─────────────── 5.6: Mission Control — persistent day journal ─────────────── */
+
+/* Every server-observed noteworthy event lands here as one JSONL line per day
+   (~/GarudaToday/journal-YYYY-MM-DD.jsonl). The client "Mission Control: today"
+   scrubber draws it as a 24 h neon timeline; browser-only events (OSC-133
+   command exits, replay opens) are POSTed by the client to /api/today/event.
+   Best-effort by design: a journal failure can never break the real request.
+   7-day retention, 8 MB/day cap, flood-guarded client posts. */
+const TODAY_DIR = path.resolve(process.env.GK_TODAY_DIR || path.join(os.homedir() || '/tmp', 'GarudaToday'));
+const TODAY_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TODAY_MAX_DAY_BYTES = 8 * 1024 * 1024;
+const TODAY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const TODAY_CATS = new Set(['cmd', 'task', 'trigger', 'sandbox', 'ai', 'file', 'share', 'conn', 'auth', 'rec', 'social', 'shell']);
+let todayBytesDate = null, todayBytes = 0, lastTodaySweep = 0;
+const journalCooldowns = new Map(); // key → last-fire ts (spam dampener for chatty sources)
+
+function todayDateStr(d = new Date()) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function todayFile(dateStr) { return path.join(TODAY_DIR, `journal-${dateStr}.jsonl`); }
+function todaySweep() {
+    const now = Date.now();
+    if (now - lastTodaySweep < 6 * 60 * 60 * 1000) return;
+    lastTodaySweep = now;
+    try {
+        for (const f of fs.readdirSync(TODAY_DIR)) {
+            const m = f.match(/^journal-(\d{4}-\d{2}-\d{2})\.jsonl$/);
+            if (m && now - new Date(m[1] + 'T00:00:00').getTime() > TODAY_RETENTION_MS) {
+                try { fs.unlinkSync(path.join(TODAY_DIR, f)); } catch (e) {}
+            }
+        }
+    } catch (e) {}
+}
+function journalAdd(cat, kind, title, meta) {
+    try {
+        if (!TODAY_CATS.has(cat)) return;
+        const dateStr = todayDateStr();
+        if (todayBytesDate !== dateStr) {
+            todayBytesDate = dateStr;
+            try { todayBytes = fs.statSync(todayFile(dateStr)).size; } catch (e) { todayBytes = 0; }
+        }
+        if (todayBytes > TODAY_MAX_DAY_BYTES) return; // day full — stop appending, old events still readable
+        const ev = { ts: Date.now(), cat, kind: String(kind).slice(0, 40), title: String(title == null ? '' : title).slice(0, 140) };
+        if (meta && typeof meta === 'object') {
+            const clean = {};
+            for (const k of Object.keys(meta).slice(0, 8)) {
+                const v = meta[k];
+                if (typeof v === 'boolean') clean[k] = v;
+                else if (typeof v === 'number' && Number.isFinite(v)) clean[k] = v;
+                else if (typeof v === 'string' && v.length) clean[k] = v.slice(0, 200);
+            }
+            if (Object.keys(clean).length) ev.meta = clean;
+        }
+        const line = JSON.stringify(ev) + '\n';
+        fs.mkdirSync(TODAY_DIR, { recursive: true });
+        fs.appendFileSync(todayFile(dateStr), line);
+        todayBytes += line.length;
+        todaySweep();
+    } catch (e) { /* best-effort */ }
+}
+/* journalAdd but at most once per `ms` for the given cooldown key */
+function journalAddCool(key, ms, cat, kind, title, meta) {
+    const now = Date.now();
+    if (now - (journalCooldowns.get(key) || 0) < ms) return;
+    journalCooldowns.set(key, now);
+    journalAdd(cat, kind, title, meta);
+}
+function journalRead(dateStr) {
+    let raw = '';
+    try { raw = fs.readFileSync(todayFile(dateStr), 'utf8'); } catch (e) { return []; }
+    const out = [];
+    for (const line of raw.split('\n')) {
+        if (!line) continue;
+        try {
+            const ev = JSON.parse(line);
+            if (ev && typeof ev.ts === 'number' && TODAY_CATS.has(ev.cat)) out.push(ev);
+        } catch (e) {}
+    }
+    return out.length > 4000 ? out.slice(-4000) : out;
+}
+app.get('/api/today', requireAuth, (req, res) => {
+    const dateStr = typeof req.query.date === 'string' && req.query.date ? req.query.date : todayDateStr();
+    if (!TODAY_DATE_RE.test(dateStr) || isNaN(new Date(dateStr + 'T00:00:00').getTime())) return res.status(400).json({ error: 'date must be a real YYYY-MM-DD' });
+    res.json({ date: dateStr, now: Date.now(), events: journalRead(dateStr) });
+});
+app.get('/api/today/dates', requireAuth, (req, res) => {
+    let dates = [];
+    try {
+        dates = fs.readdirSync(TODAY_DIR)
+            .map((f) => { const m = f.match(/^journal-(\d{4}-\d{2}-\d{2})\.jsonl$/); return m ? m[1] : null; })
+            .filter(Boolean).sort().reverse().slice(0, 8);
+    } catch (e) {}
+    res.json({ dates });
+});
+const todayClientCounts = new Map(); // token tail → { minute, n } — client event flood guard
+app.post('/api/today/event', requireAuth, (req, res) => {
+    const b = req.body || {};
+    const cat = typeof b.cat === 'string' ? b.cat : '';
+    const kind = typeof b.kind === 'string' ? b.kind.trim() : '';
+    if (!TODAY_CATS.has(cat) || !kind || kind.length > 40) return res.status(400).json({ error: 'valid cat + kind required' });
+    const tok = String(req.headers.authorization || '').slice(-12) || clientIp(req);
+    const minute = Math.floor(Date.now() / 60000);
+    const c = todayClientCounts.get(tok);
+    if (c && c.minute === minute) {
+        if (c.n >= 120) return res.status(429).json({ error: 'too many events (120/min)' });
+        c.n++;
+    } else todayClientCounts.set(tok, { minute, n: 1 });
+    journalAdd(cat, kind, b.title, b.meta && typeof b.meta === 'object' ? b.meta : null);
+    res.json({ success: true });
 });
 
 /* ─────────────── 5.5: branch sandbox (bubblewrap copy-on-write runs) ─────────────── */
@@ -1314,6 +1435,7 @@ app.post('/api/sandbox/run', requireAuth, (req, res) => {
         : `${base} --tmpfs ${shq(home)} sh -c ${shq(cmd)}`;
     const result = runTask({ name: 'sandbox: ' + cmd.split('\n')[0].slice(0, 50), cmd: wrap, cwd: null, notify: req.body.notify !== false });
     if (result.error) return res.status(400).json({ error: result.error });
+    journalAdd('sandbox', 'run', cmd.split('\n')[0].slice(0, 100), { id, overlay: caps.overlay, taskId: result.id });
     sandboxRuns.set(id, { id, taskId: result.id, layer, cmd, createdAt: Date.now(), files: null, overlay: caps.overlay });
     while (sandboxRuns.size > 10) {
         const oldest = sandboxRuns.keys().next().value;
@@ -1397,6 +1519,7 @@ app.post('/api/sandbox/:id/promote', requireAuth, (req, res) => {
             done.push(f.rel);
         } catch (e) { skipped.push(f.rel); }
     }
+    journalAdd('sandbox', 'promote', `${done.length} change(s) promoted, ${skipped.length} skipped`, { id: req.params.id, done: done.length, skipped: skipped.length });
     res.json({ success: true, done, skipped });
 });
 /* overlayfs creates its internal work dir (<layer>/wk/work) with mode 000 by
@@ -1418,6 +1541,7 @@ app.post('/api/sandbox/:id/discard', requireAuth, (req, res) => {
     if (!rec) return res.status(404).json({ error: 'not found' });
     sandboxRmLayer(rec.layer);
     sandboxRuns.delete(req.params.id);
+    journalAdd('sandbox', 'discard', 'Sandbox layer discarded', { id: req.params.id });
     res.json({ success: true });
 });
 
@@ -1449,6 +1573,7 @@ app.post('/api/recordings', requireAuth, (req, res) => {
     } catch (e) {
         return res.status(500).json({ error: 'write failed' });
     }
+    journalAdd('rec', 'save', name, { bytes, frames: chunks.length });
     res.json({ success: true, name, dir: REC_DIR, bytes });
 });
 
@@ -1765,6 +1890,7 @@ app.post('/api/files/delete', requireAuth, (req, res) => {
         } else {
             fs.unlinkSync(target);
         }
+        journalAdd('file', 'delete', path.basename(target), { dir: st.isDirectory() && !st.isSymbolicLink() });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Failed to delete' });
@@ -1827,6 +1953,7 @@ app.post('/upload', requireAuth, (req, res) => {
         });
 
         function finish() {
+            if (saved.length) journalAdd('file', 'upload', saved.slice(0, 3).join(', ') + (saved.length > 3 ? ` (+${saved.length - 3})` : ''), { count: saved.length, folder: destDir });
             res.json({ success: errors.length === 0, folder: destDir, saved, errors });
         }
     } catch (err) {
@@ -2181,6 +2308,7 @@ app.post('/api/ai/chat', requireAuth, async (req, res) => {
     if (!rateLimitAi(ip)) {
         return res.status(429).json({ error: 'AI rate limit reached (30/min). Slow down a little.' });
     }
+    journalAddCool('ai-chat', 120000, 'ai', 'session', 'AI agent session active', {});
     try {
         const body = req.body || {};
         const messages = body.messages;
@@ -2503,6 +2631,7 @@ function runTask(opts) {
             task.exitCode = exitCode == null ? 0 : exitCode;
             task.ptyProcess = null;
             log(`Task ${id} ("${task.name}") exited with code ${task.exitCode}`);
+            journalAdd('task', 'exit', task.name, { taskId: id, exitCode: task.exitCode, durMs: task.finishedAt - task.startedAt });
             if (task.notify) {
                 pushNotify(
                     task.exitCode === 0 ? '✓ Task finished' : '✗ Task failed',
@@ -2512,6 +2641,7 @@ function runTask(opts) {
             }
         });
         log(`Task ${id} started: "${task.name}" in ${cwd}`);
+        journalAdd('task', 'start', task.name, { taskId: id, cwd });
     } catch (err) {
         task.alive = false;
         task.finishedAt = Date.now();
@@ -2617,6 +2747,7 @@ const taskWaitTracker = setInterval(() => {
                 const lines = plain.split('\n').map((l) => l.replace(/\r/g, '').trim()).filter(Boolean);
                 const promptLine = (lines[lines.length - 1] || '').slice(0, 80);
                 pushNotify('⌨️ Task needs input', `"${t.name}" is waiting at a prompt${promptLine ? ` — "${promptLine}"` : ''}. Open Tasks to answer.`, 'taskwait:' + t.id).catch(() => {});
+                journalAdd('task', 'waiting', t.name, { taskId: t.id, prompt: promptLine });
             }
         } else if (t.waiting && t.waitingNotified && t.waitReminds < 3 && now - (t.waitRemindAt || now) >= TASK_REMIND_MS) {
             t.waitReminds++;
@@ -2860,6 +2991,7 @@ function evalPushTriggers(session, data) {
             if (now - (pushTriggerCooldown.get(key) || 0) < 10000) continue;
             pushTriggerCooldown.set(key, now);
             pushNotify('⚡ ' + t.name, cleanLine.slice(0, 160), 'trigger:' + t.id).catch(() => {});
+            journalAdd('trigger', 'fired', t.name, { tabId: session.tabId, line: cleanLine.slice(0, 120) });
         }
     }
 }
@@ -2900,6 +3032,7 @@ app.post('/share-upload', (req, res) => {
         function finish() {
             log(`Share-target upload → ${saved.length} file(s) into ${INBOX_DIR}`);
             if (saved.length) send(200, `Uploaded ${saved.length} file${saved.length > 1 ? 's' : ''} to GarudaUploads`, true);
+            if (saved.length) journalAdd('file', 'upload', saved.slice(0, 3).join(', '), { count: saved.length, via: 'share-sheet' });
             else send(500, 'Upload failed.', false);
         }
     } catch (e) {
@@ -2987,6 +3120,8 @@ wss.on('connection', (ws, req) => {
         isAlive: true
     };
     session.clients.add(client);
+    if (role === 'host') journalAddCool('conn-open-' + tabId, 5000, 'conn', 'open', 'Host terminal connected', { tabId });
+    else journalAdd('social', 'viewer-join', 'Viewer joined session', { tabId, mode });
 
     // Handshake: send the full replay buffer as one control frame
     const initCwd = getSessionCwd(session);
@@ -3097,6 +3232,8 @@ wss.on('connection', (ws, req) => {
             s.clients.delete(client);
             broadcastPresence(tabId);
         }
+        if (role === 'viewer') journalAdd('social', 'viewer-leave', 'Viewer left session', { tabId });
+        else journalAddCool('conn-close-' + tabId, 5000, 'conn', 'close', 'Host terminal disconnected', { tabId });
     });
 });
 

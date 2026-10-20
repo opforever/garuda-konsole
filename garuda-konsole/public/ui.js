@@ -348,6 +348,7 @@ async function loadStats(force) {
     try {
         const s = await api('/api/stats');
         lastStats = s;
+        if (typeof petVitals === 'function') petVitals(s);
         cpuHistory.push(s.cpu.usage);
         if (cpuHistory.length > 90) cpuHistory.shift();
 
@@ -648,7 +649,7 @@ async function bulkDeleteSelected() {
     if (!ok) return;
     let done = 0, failed = 0;
     for (const p of paths) {
-        try { await api('/api/files/delete', { method: 'POST', body: { path: p } }); done++; } catch (e) { failed++; }
+        try { await api('/api/files/delete', { method: 'POST', body: { path: p } }); done++; if (typeof petEvent === 'function') petEvent('file-del', { n: 1 }); } catch (e) { failed++; }
     }
     showToast(failed ? { type: 'warn', title: `Deleted ${done}, ${failed} failed` } : { type: 'success', title: `Deleted ${done} item(s)` });
     logActivity(failed ? 'warn' : 'success', `Bulk delete: ${done} item(s)${failed ? `, ${failed} failed` : ''}`);
@@ -728,6 +729,7 @@ function shellQuote(p) {
 async function actionFileDownload(node) {
     const p = node.dataset.path;
     if (!p || !token) return;
+    if (typeof petEvent === 'function') petEvent('download', {});
     window.open(`/download?path=${encodeURIComponent(p)}&auth=${encodeURIComponent(token)}`, '_blank');
 }
 
@@ -765,6 +767,7 @@ async function actionFileDelete(node) {
     try {
         await api('/api/files/delete', { method: 'POST', body: { path: p } });
         showToast({ type: 'success', title: 'Deleted', text: name });
+        if (typeof petEvent === 'function') petEvent('file-del', { name });
         loadFiles(false);
     } catch (err) {
         showToast({ type: 'error', title: 'Delete failed', text: err.message });
@@ -1213,6 +1216,8 @@ function buildPaletteItems(query) {
     for (const r of getRecentCommands().slice(0, 40)) pushScored({ sec: 'Recent', icon: '#i-clock', title: r, sub: 'run again', kw: r, run: () => { runCommandInActiveTab(r); closePalette(); } }, r);
     /* 5.2: saved workspace layouts */
     pushScored({ sec: 'Actions', icon: '#i-split', title: 'Run in branch sandbox…', sub: 'disposable write layer over HOME', kw: 'sandbox bubblewrap branch overlay test safe', run: () => { closePalette(); openSandboxModal(); } }, 'sandbox branch bubblewrap run safe');
+    pushScored({ sec: 'Actions', icon: '#i-activity', title: 'Mission Control: today', sub: '24 h timeline — every command, task & trigger', kw: 'today timeline mission control scrubber events day journal', run: () => { closePalette(); openTodayModal(); } }, 'mission control today timeline day scrubber events journal');
+    pushScored({ sec: 'Actions', icon: '#i-home', title: 'Garuda pet: moods & badges', sub: 'the tamagotchi that is your server', kw: 'pet eagle garuda mood badges achievements evolve tamagotchi', run: () => { closePalette(); openPetModal(); } }, 'garuda pet eagle mood badges achievements evolve tamagotchi');
     pushScored({ sec: 'Actions', icon: '#i-monitor', title: 'Remote Desktop: open panel', sub: 'stream this machine\'s screen', kw: 'remote desktop vnc screen stream control', run: () => { closePalette(); toggleRd(); } }, 'remote desktop open panel');
     pushScored({ sec: 'Actions', icon: '#i-monitor', title: rdState.connected ? 'Remote Desktop: stop streaming' : 'Remote Desktop: connect', sub: 'screen + input + audio', kw: 'remote desktop connect stop stream', run: () => { closePalette(); const d = $('rd-drawer'); if (d && d.classList.contains('hidden')) toggleRd(); rdState.connected ? rdDisconnect() : rdConnect(); } }, 'remote desktop connect stop');
     pushScored({ sec: 'Layouts', icon: '#i-save', title: 'Save current layout…', sub: 'tabs + splits + colors', kw: 'layout save workspace snapshot arrange', run: () => { closePalette(); saveCurrentLayoutPrompt(); } }, 'save layout workspace snapshot');
@@ -1901,6 +1906,7 @@ async function aiMicToggle(target) {
         return;
     }
     micChunks = [];
+    if (typeof petEvent === 'function') petEvent('voice-listen', {});
     const mime = pickMicMime();
     try { micRec = mime ? new MediaRecorder(micStream, { mimeType: mime }) : new MediaRecorder(micStream); }
     catch (e) { micRec = new MediaRecorder(micStream); }
@@ -2412,6 +2418,33 @@ const ACTIONS = {
     'sandbox-promote': () => promoteSandbox(),
     'sandbox-discard': () => discardSandbox(),
     'sandbox-refresh': () => refreshSandboxChanges(),
+    /* 5.6: Garuda Pet + Mission Control today */
+    'pet-toggle': () => { petEvent('petted', {}); openPetModal(); },
+    'pet-close': () => { const m = $('pet-modal'); if (m) m.classList.add('hidden'); },
+    'pet-save': () => petSaveSettings(),
+    'pet-open-today': () => openTodayModal(),
+    'today-open': () => openTodayModal(),
+    'today-close': () => closeTodayModal(),
+    'today-refresh': () => todayRefresh(true),
+    'td-close': () => { const d = $('today-detail'); if (d) d.classList.add('hidden'); todayState.sel = null; },
+    'td-replay': () => {
+        const rec = (typeof getRingRecording === 'function' && typeof getActiveTab === 'function') ? getRingRecording(getActiveTab()) : null;
+        if (rec && typeof openReplay === 'function') openReplay(rec);
+        else if (typeof showToast === 'function') showToast({ type: 'info', title: 'Replay window passed', text: 'The 60 s ring buffer no longer covers this moment.' });
+    },
+    'td-tasklog': () => { const s = todayState.sel; const id = s && s.meta && s.meta.taskId; if (id && typeof openTaskLog === 'function') openTaskLog(id); },
+    'td-rerun': () => {
+        const s = todayState.sel;
+        if (!s || !s.title) return;
+        if (typeof runCommandInActiveTab === 'function') runCommandInActiveTab(s.title);
+        closeTodayModal();
+    },
+    'td-explain': () => {
+        const s = todayState.sel;
+        if (!s) return;
+        const ctxLine = `Command: ${s.title}\nExit: ${s.meta && s.meta.exit != null ? s.meta.exit : 'unknown'}\nWhen: ${new Date(s.ts).toLocaleString()}`;
+        if (typeof aiExplainSelection === 'function') aiExplainSelection(ctxLine, 'fix');
+    },
     'ai-cmd-edit': (node) => aiCmdEdit(node.dataset.id),
     'ai-suggestion-run': (node) => aiRunSuggestion(node.dataset.id),
     'ai-save-config': () => saveAiConfig(),
@@ -2990,6 +3023,7 @@ function uploadToCurrentFilesFolder(fileList) {
         try { body = JSON.parse(xhr.responseText); } catch (e) {}
         if (xhr.status === 200 && body && body.success) {
             showToast({ id: 'upload-progress', type: 'success', title: 'Upload complete', text: (body.saved || []).join(', ') || label });
+            if (typeof petEvent === 'function') petEvent('upload', { n: (body.saved || []).length });
             loadFiles(false);
         } else {
             showToast({ id: 'upload-progress', type: 'error', title: 'Upload failed', text: (body && (body.error || (body.errors || []).join('; '))) || `HTTP ${xhr.status}` });
@@ -3219,6 +3253,7 @@ function openReplay(forcedRec) {
         showToast({ type: 'info', title: 'No recording yet', text: 'Hit the record button (or “Record active tab” in the palette) first.' });
         return;
     }
+    if (typeof petEvent === 'function') petEvent('replay', {});
     const modal = $('replay-modal');
     const holder = $('replay-term');
     const title = $('replay-title');
@@ -4433,6 +4468,7 @@ async function renderTasks() {
         return;
     }
     const tasksList = (data.tasks || []).slice(0, 40);
+    if (typeof petTasks === 'function') petTasks(data.tasks || []);
     /* Waiting-task alerts run even while the tab is hidden — that is exactly
        when they matter (this used to be unreachable dead code: the poll only
        ran while visible, the notify only fired while hidden). */
@@ -5000,6 +5036,7 @@ function bindEditorOnce() {
     });
 }
 async function openEditor(p) {
+    if (typeof petEvent === 'function') petEvent('editor-open', { path: String(p || '').slice(-80) });
     const modal = $('editor-modal');
     if (!modal || !p) return;
     try {
@@ -5533,6 +5570,7 @@ async function createFileShare() {
         const input = $('fileshare-url');
         if (box && input) { box.classList.remove('hidden'); input.value = url; }
         try { await navigator.clipboard.writeText(url); } catch (e) {}
+        if (typeof petEvent === 'function') petEvent('share', {});
         showToast({ type: 'success', title: 'Share link copied', text: `${mode} · ${hours} h${maxViews ? ' · max ' + maxViews + ' views' : ''}`, duration: 4500 });
         renderFileShareList();
     } catch (e) { showToast({ type: 'error', title: 'Share failed', text: String(e.message || e) }); }
@@ -5572,7 +5610,7 @@ async function openSandboxModal() {
     const st = await api('/api/sandbox/status').catch(() => null);
     const note = $('sandbox-note');
     if (note) {
-        if (!st || !st.available) { note.textContent = 'bubblewrap is NOT installed on the host — install with: sudo pacman -S bubblewrap'; note.classList.remove('hidden'); }
+        if (!st || !st.available) { note.textContent = 'bubblewrap is NOT installed on the host — install with: sudo pacman -S bubblewrap'; note.classList.remove('hidden'); if (typeof petEvent === 'function') petEvent('sandbox-nobwrap', {}); }
         else if (!st.overlay) { note.textContent = 'bwrap present but without --overlay: sandbox home will be an empty tmpfs (writes isolated, reads invisible).'; note.classList.remove('hidden'); }
         else { note.textContent = 'Writes and deletions land in a throwaway layer over your HOME; reads see the real system. Promote or discard afterwards.'; note.classList.remove('hidden'); }
     }
@@ -5590,16 +5628,19 @@ async function runSandbox() {
         const r = await api('/api/sandbox/run', { method: 'POST', body: { cmd } });
         sandboxState.id = r.id;
         sandboxState.taskId = r.taskId;
+        if (typeof petEvent === 'function') petEvent('sandbox-run', {});
+        try { petState.ctx.sandboxActive = true; } catch (e) {}
         let cursor = 0;
         sandboxState.timer = setInterval(async () => {
             try {
                 const d = await api(`/api/tasks/${sandboxState.taskId}/log?from=${cursor}`);
-                if (d && typeof d.log === 'string') { cursor = d.next || cursor + d.log.length; if (log) log.textContent += d.log; if (log) log.scrollTop = log.scrollHeight; }
+                if (d && typeof d.log === 'string') { cursor = d.next || cursor + d.log.length; if (log) log.textContent += d.log; if (log) log.scrollTop = log.scrollHeight; if (/\bbwrap:/.test(d.log) && typeof petEvent === 'function') petEvent('sandbox-fail', {}); }
                 const t = await api('/api/tasks');
                 const task = (t.tasks || []).find((x) => x.id === sandboxState.taskId);
                 if (!task || !task.alive) {
                     sandboxPollStop();
                     sandboxState.done = true;
+                    try { petState.ctx.sandboxActive = false; } catch (e) {}
                     if (log) log.textContent += '\n— sandbox run finished —';
                     if (acts) acts.classList.remove('hidden');
                     refreshSandboxChanges();
@@ -5615,6 +5656,7 @@ async function refreshSandboxChanges() {
     if (!host || !sandboxState.id) return;
     try {
         const d = await api(`/api/sandbox/${sandboxState.id}/changes`);
+        if (typeof petEvent === 'function') petEvent('sandbox-done', { n: (d.files || []).length });
         host.innerHTML = d.files.length
             ? d.files.map((f) => f.deleted
                 ? `<div class="fshare-row"><span class="fshare-name sbx-del">✖ ${escHtml(f.rel)}</span><span class="fshare-meta">deleted</span></div>`
@@ -5628,6 +5670,7 @@ async function promoteSandbox() {
     if (!ok) return;
     try {
         const r = await api(`/api/sandbox/${sandboxState.id}/promote`, { method: 'POST', body: {} });
+        if (typeof petEvent === 'function') petEvent('sandbox-promote', { n: r.done.length });
         showToast({ type: 'success', title: `Promoted ${r.done.length} change(s)`, text: r.skipped.length ? r.skipped.length + ' skipped (protected)' : '', duration: 4000 });
         await discardSandbox(true);
     } catch (e) { showToast({ type: 'error', title: 'Promote failed', text: String(e.message || e) }); }
@@ -5636,11 +5679,782 @@ async function discardSandbox(silent) {
     if (!sandboxState.id) return;
     try {
         await api(`/api/sandbox/${sandboxState.id}/discard`, { method: 'POST', body: {} });
+        if (typeof petEvent === 'function') petEvent('sandbox-discard', {});
         if (!silent) showToast({ type: 'success', title: 'Sandbox layer discarded', duration: 1800, silent: true });
     } catch (e) {}
+    try { petState.ctx.sandboxActive = false; } catch (e2) {}
     const host = $('sandbox-changes');
     if (host) host.innerHTML = '';
     const acts = $('sandbox-actions');
     if (acts) acts.classList.add('hidden');
     sandboxState.id = null;
+}
+
+/* ─────────────── 5.6: Garuda Pet — the tamagotchi that IS your server ───────────────
+   A mood-resolution engine with 110+ named moods. One resolver, one context object:
+   every signal the app already has (stats poll, OSC-133 exits, triggers, tasks,
+   sandbox, AI agent, viewers, chat, files, recordings, connection, clock, idle)
+   feeds petCtx; transient events live in ctx.ev with TTLs; the highest-priority
+   mood whose test passes wins. Pure resolver (petResolveMood) = unit-testable. */
+
+const PET_STAGES = [
+    { id: 'egg', name: 'Egg', minSec: 0, hint: 'It barely knows what a shell is.' },
+    { id: 'chick', name: 'Chick', minSec: 600, hint: '10 min of active time — hatched!' },
+    { id: 'fledgling', name: 'Fledgling', minSec: 3600, hint: '1 h — learning to grep.' },
+    { id: 'juvenile', name: 'Juvenile', minSec: 21600, hint: '6 h — fluent in exit codes.' },
+    { id: 'adult', name: 'Adult', minSec: 86400, hint: '24 h — a proper shell raptor.' },
+    { id: 'majestic', name: 'Majestic', minSec: 259200, hint: '3 days — crowned by uptime.' },
+    { id: 'phoenix', name: 'Phoenix', minSec: 604800, hint: '7 days — it has seen reboots and lived.' }
+];
+
+/* M(id, name, prio, pose{e,b,w,r,x}, anim, tint, line, test, ttlMs) */
+const PET_MOODS = [];
+function petM(id, name, prio, pose, anim, tint, line, test, ttl) {
+    PET_MOODS.push({ id, name, prio, pose, anim, tint, line, test, ttl: ttl || 0 });
+}
+const P = (c, k) => !!(c.ev[k] && c.ev[k].until > c.now);          // transient event active?
+const PD = (c, k, f) => (f ? c.ev[k] && c.ev[k].until > c.now : false) && f(c.ev[k].data || {}); // + data predicate
+const E = 'none';
+
+/* ── vitals: CPU bands (8) ── */
+petM('cpu-melt', 'MELTDOWN', 800, { e: 'xx', b: 'open', w: 'droop', r: E, x: 'smoke' }, 'glitch', 'hot', 'CPU pinned — the feathers are singeing.', (c) => c.cpu >= 95);
+petM('cpu-pegged', 'Pegged', 600, { e: 'wide', b: 'open', w: 'raise', r: 'worry', x: 'sweat' }, 'vibrate', 'hot', 'CPU above 85% — it is fanning itself with a log file.', (c) => c.cpu >= 85);
+petM('cpu-pant', 'Panting', 560, { e: 'half', b: 'open', w: 'fold', r: E, x: 'sweat' }, 'shake', 'none', 'CPU is cooking. Something big is compiling.', (c) => c.cpu >= 70);
+petM('cpu-strain', 'Straining', 450, { e: 'open', b: 'shut', w: 'fold', r: 'think', x: 'sweat' }, 'bob', 'none', 'Working hard, hardly working.', (c) => c.cpu >= 50);
+petM('cpu-focus', 'Focused', 300, { e: 'open', b: 'shut', w: 'fold', r: E, x: 'gear' }, 'bob', 'none', 'A healthy hum of processes.', (c) => c.cpu >= 30);
+petM('cpu-busy', 'Busy bee', 290, { e: 'open', b: 'shut', w: 'flap', r: E, x: E }, 'bob', 'none', 'Flapping along at a nice clip.', (c) => c.cpu >= 15);
+petM('cpu-cruise', 'Cruising', 280, { e: 'happy', b: 'shut', w: 'fold', r: E, x: E }, 'sway', 'none', 'Cruising altitude. Winds are light.', (c) => c.cpu >= 5);
+petM('cpu-zen', 'Zen idle', 270, { e: 'half', b: 'shut', w: 'fold', r: E, x: E }, 'float', 'none', 'CPU idle. It is meditating on /dev/null.', (c) => c.cpu >= 0 && c.uptimeS > 300);
+/* ── vitals: RAM bands (7) ── */
+petM('ram-oom', 'OOM territory', 800, { e: 'xx', b: 'open', w: 'cover', r: E, x: 'smoke' }, 'shiver', 'storm', 'RAM ≥ 95% — the oom-killer is circling. Save your work!', (c) => c.memPct >= 95);
+petM('ram-critical', 'RAM critical', 600, { e: 'wide', b: 'shut', w: 'raise', r: 'worry', x: 'sweat' }, 'shiver', 'none', 'Memory above 88%. Something is hungry.', (c) => c.memPct >= 88);
+petM('ram-bloat', 'Bloated', 550, { e: 'dot', b: 'flat', w: 'fold', r: E, x: 'crumb' }, 'sway', 'none', 'RAM is stuffed. Maybe close 3 of those 47 browser tabs.', (c) => c.memPct >= 75);
+petM('ram-heavy', 'Heavy', 440, { e: 'half', b: 'shut', w: 'fold', r: 'think', x: 'sweat' }, 'bob', 'none', 'Memory is getting chunky.', (c) => c.memPct >= 60);
+petM('ram-filling', 'Filling up', 320, { e: 'open', b: 'shut', w: 'fold', r: E, x: E }, 'bob', 'none', 'RAM is filling — normal working weight.', (c) => c.memPct >= 45);
+petM('ram-comfy', 'Comfortable', 260, { e: 'happy', b: 'shut', w: 'fold', r: E, x: E }, 'sway', 'none', 'Memory: comfy.', (c) => c.memPct >= 25);
+petM('ram-light', 'Light as a feather', 250, { e: 'happy', b: 'shut', w: 'fold', r: E, x: 'spark' }, 'float', 'none', 'Tons of free RAM. It could run a game. Or nine.', (c) => c.memPct >= 0);
+/* ── vitals: disk bands (6) ── */
+petM('disk-full', 'Disk FULL', 800, { e: 'xx', b: 'open', w: 'cover', r: E, x: 'smoke' }, 'shake', 'sick', 'Disk ≥ 97% — it cannot even write a whiteout. Free space NOW.', (c) => c.diskPct >= 97);
+petM('disk-hungry', 'Hungry', 600, { e: 'dot', b: 'open', w: 'fold', r: 'worry', x: 'crumb' }, 'shiver', 'none', 'Disk above 92%. Feed it: rm -rf node_modules (kidding… mostly).', (c) => c.diskPct >= 92);
+petM('disk-crowded', 'Crowded nest', 540, { e: 'half', b: 'flat', w: 'fold', r: 'worry', x: E }, 'bob', 'none', 'Disk above 85% — the nest is getting cluttered.', (c) => c.diskPct >= 85);
+petM('disk-tight', 'Tight fit', 430, { e: 'open', b: 'shut', w: 'fold', r: 'think', x: 'crumb' }, 'bob', 'none', 'Disk above 70%. Manageable, but keep an eye on it.', (c) => c.diskPct >= 70);
+petM('disk-okay', 'Disk okay', 310, { e: 'open', b: 'shut', w: 'fold', r: E, x: E }, 'bob', 'none', 'Plenty of sectors to spare.', (c) => c.diskPct >= 50);
+petM('disk-roomy', 'Roomy', 305, { e: 'happy', b: 'shut', w: 'fold', r: E, x: E }, 'sway', 'none', 'So much free disk it echoes.', (c) => c.diskPct > 0);
+petM('disk-clean', 'Room to soar', 306, { e: 'happy', b: 'shut', w: 'flap', r: 'smug', x: 'spark' }, 'float', 'none', 'Under 30% disk used — room to soar.', (c) => c.diskPct > 0 && c.diskPct < 30);
+/* ── vitals: composite (6) ── */
+petM('vitals-crisis', 'Double crisis', 810, { e: 'xx', b: 'open', w: 'raise', r: 'angry', x: 'bolt' }, 'glitch', 'storm', 'RAM AND disk both critical. This is not a drill.', (c) => c.memPct >= 90 && c.diskPct >= 90);
+petM('vitals-hot', 'Running hot', 610, { e: 'wide', b: 'open', w: 'raise', r: E, x: 'sweat' }, 'shake', 'hot', 'CPU and RAM both glowing. Fans are singing the song of their people.', (c) => c.cpu >= 80 && c.memPct >= 70);
+petM('load-heavy', 'Load-bearing bird', 605, { e: 'open', b: 'flat', w: 'droop', r: 'worry', x: 'sweat' }, 'shiver', 'none', 'Load average is more than 2× the core count.', (c) => c.cores > 0 && c.load1 / c.cores > 2);
+petM('cpu-spike', 'CPU spike!', 700, { e: 'wide', b: 'open', w: 'flap', r: E, x: 'bang' }, 'jolt', 'none', 'WHOA — CPU just jumped out of nowhere.', (c) => P(c, 'cpu-spike'), 6000);
+petM('mem-climb', 'Memory climbing', 750, { e: 'wide', b: 'shut', w: 'fold', r: 'worry', x: 'question' }, 'tilt', 'none', 'RAM keeps climbing tick after tick… leak?', (c) => P(c, 'mem-climb'), 8000);
+petM('vitals-perfect', 'Perfect vitals', 100, { e: 'happy', b: 'shut', w: 'fold', r: 'smug', x: 'halo' }, 'float', 'neon', 'CPU cool, RAM roomy, disk open. Textbook healthy.', (c) => c.cpu < 20 && c.memPct < 50 && (c.diskPct === 0 || c.diskPct < 70));
+/* ── command events (14) ── */
+petM('cmd-segfault', 'SEGFAULT', 805, { e: 'spiral', b: 'open', w: 'raise', r: E, x: 'bolt' }, 'glitch', 'storm', 'Exit 139. Somewhere, a pointer cried out.', (c) => PD(c, 'cmd-fail', (d) => d.status === 139), 12000);
+petM('cmd-catastrophic', 'Catastrophic exit', 801, { e: 'dead', b: 'open', w: 'droop', r: 'angry', x: 'smoke' }, 'shake', 'hot', 'Killed by a signal or worse (exit ≥ 128).', (c) => PD(c, 'cmd-fail', (d) => d.status >= 128), 11000);
+petM('cmd-fail-repeat', 'Another one?!', 802, { e: 'closed', b: 'flat', w: 'droop', r: 'worry', x: 'tears' }, 'droop', 'none', 'Two failures in a row. It believes in you though. Probably.', (c) => PD(c, 'cmd-fail2', () => true), 10000);
+petM('cmd-fail', 'Command failed', 800, { e: 'angry', b: 'flat', w: 'droop', r: 'angry', x: 'bang' }, 'jolt', 'hot', 'Non-zero exit. The fail chip knows why. So does the AI.', (c) => P(c, 'cmd-fail'), 9000);
+petM('cmd-long-win', 'Long build WON', 720, { e: 'star', b: 'sing', w: 'raise', r: 'smug', x: 'confetti' }, 'spin', 'gold', 'That build took forever and it PASSED. Victory dance!', (c) => PD(c, 'cmd-ok', (d) => (d.durMs || 0) >= 20000), 10000);
+petM('cmd-quick', 'Quick draw', 710, { e: 'wink', b: 'grin', w: 'oneup', r: 'smug', x: 'spark' }, 'bounce', 'none', 'Under a second. Lightning talons.', (c) => PD(c, 'cmd-ok', (d) => d.durMs != null && d.durMs < 1000), 5000);
+petM('cmd-ok', 'Command succeeded', 700, { e: 'happy', b: 'shut', w: 'fold', r: 'smug', x: 'spark' }, 'bounce', 'none', 'Exit 0. Clean. Crisp. Chef\u2019s kiss.', (c) => P(c, 'cmd-ok'), 6000);
+petM('cmd-spam', 'Rapid fire', 705, { e: 'wide', b: 'open', w: 'flap', r: E, x: 'bolt' }, 'vibrate', 'none', 'Five commands in ten seconds. Slow down, cowboy.', (c) => P(c, 'cmd-spam'), 6000);
+petM('cmd-firehose', 'Output firehose', 703, { e: 'spiral', b: 'open', w: 'cover', r: E, x: 'bang' }, 'shake', 'none', 'That much output in one go? It is dizzy.', (c) => P(c, 'huge-output'), 7000);
+petM('cmd-sudo', 'Wearing the crown', 702, { e: 'open', b: 'flat', w: 'fold', r: 'smug', x: 'crown' }, 'tilt', 'gold', 'sudo detected. With great power comes great rm -rf.', (c) => P(c, 'sudo'), 8000);
+petM('cmd-bell', 'BELL!', 701, { e: 'wide', b: 'open', w: 'raise', r: E, x: 'bang' }, 'jolt', 'none', 'The terminal bell rang. Someone wants attention.', (c) => P(c, 'bell'), 5000);
+petM('cmd-int', 'Interrupted', 699, { e: 'half', b: 'flat', w: 'droop', r: 'worry', x: 'question' }, 'tilt', 'none', 'Ctrl+C — cut off mid-sentence.', (c) => P(c, 'cmd-int'), 6000);
+petM('cmd-long-watch', 'Watching the build', 698, { e: 'dot', b: 'shut', w: 'fold', r: 'think', x: 'coffee' }, 'doze', 'none', 'Long-running command… it brought coffee.', (c) => P(c, 'cmd-long'), 25000);
+petM('cmd-start', 'Command starting', 697, { e: 'open', b: 'shut', w: 'tuck', r: E, x: 'gear' }, 'bob', 'none', 'Here we go.', (c) => P(c, 'cmd-start'), 3500);
+/* ── idle & time of day (12) ── */
+petM('time-3am', '3 AM debugger', 500, { e: 'wide', b: 'flat', w: 'fold', r: 'think', x: 'moon' }, 'tilt', 'cold', 'It is the middle of the night and YOU ARE STILL DEBUGGING. Respect.', (c) => c.hour >= 0 && c.hour < 5 && c.idleMs < 300000);
+petM('idle-deep-sleep', 'Deep sleep', 363, { e: 'closed', b: 'shut', w: 'cover', r: E, x: 'zzz' }, 'doze', 'ghost', 'Idle over 30 min. Do not disturb (unless the server is on fire).', (c) => c.idleMs > 1800000);
+petM('idle-nap', 'Napping', 362, { e: 'sleepy', b: 'shut', w: 'fold', r: E, x: 'zzz' }, 'doze', 'none', 'Ten minutes of nothing. Power nap engaged.', (c) => c.idleMs > 600000);
+petM('idle-bored', 'Bored', 361, { e: 'half', b: 'flat', w: 'fold', r: E, x: 'question' }, 'sway', 'none', 'Two minutes idle. It is counting inodes for fun.', (c) => c.idleMs > 120000);
+petM('idle-curious', 'Curious', 360, { e: 'open', b: 'shut', w: 'fold', r: 'think', x: 'question' }, 'tilt', 'none', 'Quiet out there. Whatcha thinking about?', (c) => c.idleMs > 30000);
+petM('night-owl', 'Night owl', 350, { e: 'half', b: 'shut', w: 'fold', r: E, x: 'moon' }, 'sway', 'cold', 'Late-night session. The dark theme was the right call.', (c) => c.hour >= 22);
+petM('time-evening', 'Evening glide', 330, { e: 'happy', b: 'shut', w: 'fold', r: E, x: 'coffee' }, 'sway', 'gold', 'Evening. Winding down, one tail -f at a time.', (c) => c.hour >= 18);
+petM('time-noon', 'Noon refuel', 330, { e: 'open', b: 'open', w: 'fold', r: E, x: 'coffee' }, 'bob', 'none', 'Lunchtime. It is eating garbage-collected crumbs.', (c) => c.hour >= 12);
+petM('time-morning', 'Morning flight', 330, { e: 'shine', b: 'sing', w: 'flap', r: E, x: 'sun' }, 'flap', 'gold', 'Good morning! Coffee first, root cause second.', (c) => c.hour >= 6);
+petM('monday-blues', 'Monday blues', 340, { e: 'half', b: 'flat', w: 'droop', r: 'worry', x: 'coffee' }, 'sway', 'cold', 'Monday morning. The backlog can smell fear.', (c) => c.dow === 1 && c.hour >= 8 && c.hour < 11);
+petM('weekend-chill', 'Weekend chill', 340, { e: 'happy', b: 'grin', w: 'fold', r: 'smug', x: 'sun' }, 'float', 'none', 'It is the weekend. Deploying on Friday is a myth, right? RIGHT?', (c) => (c.dow === 0 || c.dow === 6) && c.idleMs > 60000);
+petM('idle-calm', 'Calm', 0, { e: 'open', b: 'shut', w: 'fold', r: E, x: E }, 'bob', 'none', 'Perched and ready. This is its normal face.', () => true);
+/* ── tasks (8) ── */
+petM('task-waiting', 'TASK NEEDS INPUT', 900, { e: 'wide', b: 'open', w: 'oneup', r: E, x: 'question' }, 'hop', 'neon', 'A background task is stuck at a prompt. Go answer it!', (c) => c.waitingTasks > 0 || P(c, 'task-waiting'), 8000);
+petM('task-failed', 'Task failed', 800, { e: 'angry', b: 'flat', w: 'droop', r: 'angry', x: 'bang' }, 'jolt', 'hot', 'A background task died non-zero. Check the log.', (c) => P(c, 'task-fail'), 10000);
+petM('tasks-overload', 'Task overload', 510, { e: 'wide', b: 'open', w: 'flap', r: E, x: 'gear' }, 'vibrate', 'none', 'Five or more tasks running. It has not got enough talons.', (c) => c.runningTasks >= 5);
+petM('tasks-juggling', 'Juggling tasks', 505, { e: 'open', b: 'shut', w: 'flap', r: 'think', x: 'gear' }, 'flap', 'none', 'Multiple background tasks in the air. Watch the tails.', (c) => c.runningTasks >= 2);
+petM('task-launched', 'Task launched', 706, { e: 'star', b: 'shut', w: 'oneup', r: 'smug', x: 'spark' }, 'hop', 'none', 'Background task away! Detached and dangerous (in a good way).', (c) => P(c, 'task-start'), 6000);
+petM('task-done', 'Task done', 705, { e: 'happy', b: 'grin', w: 'raise', r: 'smug', x: 'confetti' }, 'bounce', 'none', 'Task finished clean. Another one bites the dust.', (c) => P(c, 'task-ok'), 8000);
+petM('schedule-fired', 'Scheduler fired', 704, { e: 'shine', b: 'shut', w: 'fold', r: 'smug', x: 'gear' }, 'tilt', 'neon', 'A scheduled job just fired on time. Tick tock, baby.', (c) => P(c, 'schedule'), 7000);
+petM('task-quiet', 'All tasks clear', 700, { e: 'half', b: 'shut', w: 'fold', r: 'smug', x: 'spark' }, 'sway', 'none', 'Every background task has landed. Silence is golden.', (c) => P(c, 'task-clear'), 6000);
+/* ── triggers (5) ── */
+petM('trigger-error', 'Error trigger!', 800, { e: 'wide', b: 'open', w: 'raise', r: 'worry', x: 'bolt' }, 'jolt', 'hot', 'A trigger matched something that looks like an error.', (c) => PD(c, 'trigger', (d) => /err|fail|crit|fatal|panic/i.test(d.name + ' ' + (d.line || ''))), 8000);
+petM('trigger-success', 'Success trigger!', 710, { e: 'star', b: 'sing', w: 'raise', r: 'smug', x: 'confetti' }, 'bounce', 'gold', 'A trigger saw success. BUILD SUCCESS energy.', (c) => PD(c, 'trigger', (d) => /succ|pass|done|ok|complete/i.test(d.name + ' ' + (d.line || ''))), 8000);
+petM('trigger-spam', 'Trigger storm', 708, { e: 'spiral', b: 'open', w: 'cover', r: E, x: 'bolt' }, 'shake', 'storm', 'Three triggers in a minute. Whatever you are watching is chatty.', (c) => P(c, 'trigger-spam'), 7000);
+petM('trigger-custom', 'Trigger fired', 702, { e: 'wide', b: 'shut', w: 'oneup', r: 'think', x: 'bang' }, 'hop', 'none', 'One of your regexes just matched. Go look!', (c) => P(c, 'trigger'), 7000);
+petM('trigger-armed', 'Watching the output', 310, { e: 'open', b: 'shut', w: 'fold', r: 'think', x: 'eye' }, 'sway', 'none', 'Triggers armed. Every line is being watched. It never blinks.', (c) => c.triggersArmed > 0);
+/* ── sandbox (8) ── */
+petM('sandbox-nobwrap', 'bwrap missing', 650, { e: 'dot', b: 'flat', w: 'droop', r: 'worry', x: 'question' }, 'tilt', 'none', 'bubblewrap is not installed — the sandbox cannot run. sudo pacman -S bubblewrap.', (c) => P(c, 'sandbox-nobwrap'), 12000);
+petM('sandbox-fail', 'Sandbox error', 800, { e: 'xx', b: 'flat', w: 'droop', r: 'worry', x: 'smoke' }, 'shiver', 'hot', 'The sandbox run hit a bwrap error. Check the log.', (c) => P(c, 'sandbox-fail'), 10000);
+petM('sandbox-promote', 'Promoted!', 720, { e: 'star', b: 'sing', w: 'raise', r: 'smug', x: 'confetti' }, 'spin', 'gold', 'Sandbox writes promoted to the real home (originals kept as .bak).', (c) => P(c, 'sandbox-promote'), 10000);
+petM('sandbox-discard', 'Layer flushed', 705, { e: 'half', b: 'shut', w: 'fold', r: E, x: 'spark' }, 'tilt', 'none', 'Sandbox layer discarded. Like it never happened.', (c) => P(c, 'sandbox-discard'), 7000);
+petM('sandbox-changes', 'Changes captured', 704, { e: 'shine', b: 'shut', w: 'fold', r: 'smug', x: 'gear' }, 'bob', 'neon', 'The layer caught writes and deletions. Review them!', (c) => PD(c, 'sandbox-done', (d) => (d.n || 0) > 0), 9000);
+petM('sandbox-empty', 'Sandbox: nothing written', 700, { e: 'half', b: 'flat', w: 'fold', r: 'think', x: 'question' }, 'tilt', 'none', 'The sandbox run wrote nothing. Clean hands, empty layer.', (c) => PD(c, 'sandbox-done', (d) => (d.n || 0) === 0), 8000);
+petM('sandbox-enter', 'Entering sandbox', 703, { e: 'open', b: 'shut', w: 'tuck', r: 'think', x: 'shield' }, 'bob', 'neon', 'Copy-on-write layer over HOME. What happens in bwrap stays in bwrap.', (c) => P(c, 'sandbox-run'), 8000);
+petM('sandbox-scientist', 'Lab coat on', 502, { e: 'dot', b: 'flat', w: 'fold', r: 'think', x: 'gear' }, 'sway', 'none', 'A sandbox run is in progress. Observing. Taking notes.', (c) => c.sandboxActive);
+/* ── AI agent (9) ── */
+petM('ai-fail', 'AI error', 800, { e: 'angry', b: 'flat', w: 'droop', r: 'worry', x: 'bang' }, 'jolt', 'hot', 'The AI agent hit an error. Key? Model? Rate limit? It is frustrated too.', (c) => P(c, 'ai-error'), 10000);
+petM('ai-ratelimit', 'Rate-limited coffee break', 710, { e: 'half', b: 'open', w: 'fold', r: E, x: 'coffee' }, 'sway', 'none', 'Groq says slow down. Sipping coffee, backing off, will retry.', (c) => P(c, 'ai-ratelimit'), 10000);
+petM('ai-approval', 'Agent awaits approval', 709, { e: 'wide', b: 'shut', w: 'oneup', r: 'think', x: 'question' }, 'hop', 'neon', 'The agent proposed a command and is waiting for your Run / Edit / Skip.', (c) => P(c, 'ai-cmd-pending'), 12000);
+petM('ai-success', 'Agent nailed it', 720, { e: 'star', b: 'grin', w: 'raise', r: 'smug', x: 'spark' }, 'bounce', 'gold', 'AI run finished without errors. Smug little bird.', (c) => P(c, 'ai-done'), 9000);
+petM('ai-supervise', 'Supervising the agent', 700, { e: 'dot', b: 'flat', w: 'fold', r: 'think', x: 'shield' }, 'bob', 'none', 'The agent is running a command. Eyes on it.', (c) => P(c, 'ai-cmd'), 8000);
+petM('ai-thinking', 'AI thinking', 500, { e: 'shine', b: 'shut', w: 'fold', r: 'think', x: 'gear' }, 'pulse', 'neon', 'Tokens are flowing. The agent is plotting (helpfully).', (c) => c.aiBusy);
+petM('ai-auto', 'AUTO mode — helmet on', 510, { e: 'open', b: 'flat', w: 'tuck', r: E, x: 'shield' }, 'bob', 'neon', 'Agent in Auto mode. Commands fly without approval. Helmet on.', (c) => c.aiBusy && c.aiMode === 'auto');
+petM('voice-talk', 'Speaking', 706, { e: 'happy', b: 'sing', w: 'oneup', r: E, x: 'notes' }, 'sway', 'none', 'Orpheus is singing a reply. It is mouthing the words.', (c) => P(c, 'voice-talk'), 8000);
+petM('voice-listen', 'Listening…', 707, { e: 'wide', b: 'shut', w: 'raise', r: E, x: 'notes' }, 'pulse', 'none', 'Mic open — Whisper is transcribing. Speak, human.', (c) => P(c, 'voice-listen'), 12000);
+/* ── social (6) ── */
+petM('viewer-join', 'Someone\u2019s watching!', 715, { e: 'wide', b: 'open', w: 'flap', r: E, x: 'spark' }, 'flap', 'none', 'A viewer just joined the session. It immediately pretends to be productive.', (c) => P(c, 'viewer-join'), 8000);
+petM('crowd', 'Full house', 505, { e: 'star', b: 'sing', w: 'flap', r: 'smug', x: 'confetti' }, 'flap', 'gold', 'Three or more viewers. It is putting on a show.', (c) => c.viewers >= 3);
+petM('pair-on', 'Pair programming', 500, { e: 'happy', b: 'shut', w: 'oneup', r: 'smug', x: E }, 'sway', 'none', 'Somebody is paired on the session. Two humans, one bird.', (c) => c.viewers > 0);
+petM('chat-msg', 'Chatter!', 705, { e: 'happy', b: 'open', w: 'fold', r: E, x: 'notes' }, 'hop', 'none', 'New message in session chat. It read it. It has opinions.', (c) => P(c, 'chat'), 6000);
+petM('share-created', 'Sharing something', 703, { e: 'shine', b: 'grin', w: 'raise', r: 'smug', x: 'spark' }, 'tilt', 'none', 'A file-share link was created. Handle with care (and expiry).', (c) => P(c, 'share'), 7000);
+petM('solo-focus', 'Just you and me', 310, { e: 'half', b: 'shut', w: 'fold', r: E, x: E }, 'sway', 'none', 'No viewers, no chat. Deep work hours.', (c) => c.viewers === 0 && c.sessions <= 1 && c.idleMs < 60000);
+/* ── files & recordings (7) ── */
+petM('upload', 'Catching uploads', 704, { e: 'happy', b: 'open', w: 'raise', r: E, x: 'spark' }, 'hop', 'none', 'Files incoming! It is catching them mid-air.', (c) => P(c, 'upload'), 7000);
+petM('download', 'Handing files over', 702, { e: 'happy', b: 'shut', w: 'oneup', r: E, x: E }, 'tilt', 'none', 'A download just went out. Careful, it is still warm.', (c) => P(c, 'download'), 6000);
+petM('file-mourn', 'Mourning a file', 701, { e: 'closed', b: 'flat', w: 'droop', r: 'worry', x: 'tears' }, 'droop', 'cold', 'A file was deleted. A moment of silence… (it is in the trash, right? RIGHT?)', (c) => P(c, 'file-del'), 8000);
+petM('editor-read', 'Reading along', 700, { e: 'dot', b: 'shut', w: 'fold', r: 'think', x: 'gear' }, 'sway', 'none', 'The file editor is open. It is reading over your shoulder.', (c) => P(c, 'editor-open'), 8000);
+petM('rec-live', 'ON AIR', 500, { e: 'wide', b: 'shut', w: 'tuck', r: E, x: 'bolt' }, 'pulse', 'hot', 'Recording is live. Behave — this is going in the replay archive.', (c) => c.recActive);
+petM('rec-start', 'Clapperboard!', 706, { e: 'star', b: 'open', w: 'raise', r: E, x: 'spark' }, 'jolt', 'none', 'REC started. Action!', (c) => P(c, 'rec-start'), 6000);
+petM('replay-dizzy', 'Time travel', 703, { e: 'spiral', b: 'flat', w: 'cover', r: E, x: 'question' }, 'spin', 'cold', 'Scrubbing a replay makes it a little dizzy. Worth it.', (c) => P(c, 'replay'), 7000);
+/* ── connection (5) ── */
+petM('ws-lost', 'CONNECTION LOST', 950, { e: 'wide', b: 'open', w: 'raise', r: 'angry', x: 'bolt' }, 'shake', 'storm', 'The websocket dropped! It is clinging to the reconnect timer.', (c) => (!c.wsOk && c.wsDownMs <= 30000) || P(c, 'ws-lost'), 10000);
+petM('offline-sleep', 'Offline limbo', 940, { e: 'closed', b: 'shut', w: 'cover', r: E, x: 'zzz' }, 'doze', 'ghost', 'Disconnected for a while… conserving energy until you return.', (c) => !c.wsOk && c.wsDownMs > 30000);
+petM('reconnect-relief', 'Reconnected — phew', 730, { e: 'happy', b: 'sing', w: 'flap', r: E, x: 'spark' }, 'bounce', 'none', 'The socket is back. It pretends nothing happened.', (c) => P(c, 'ws-ok'), 6000);
+petM('server-blink', 'Server blinked', 850, { e: 'spiral', b: 'open', w: 'raise', r: E, x: 'question' }, 'glitch', 'cold', 'The shell died and revived. What did it miss?!', (c) => P(c, 'revive'), 9000);
+petM('lag-drift', 'Laggy uplink', 700, { e: 'half', b: 'flat', w: 'droop', r: 'worry', x: 'sweat' }, 'sway', 'cold', 'Ping above 300 ms. Everything is swimming in molasses.', (c) => PD(c, 'lag', (d) => (d.ms || 0) <= 800), 6000);
+petM('ping-panic', 'Ping panic', 800, { e: 'wide', b: 'open', w: 'raise', r: 'worry', x: 'sweat' }, 'shiver', 'storm', 'Ping over 800 ms — is the server on the moon?', (c) => PD(c, 'lag', (d) => (d.ms || 0) > 800), 6000);
+/* ── meta / pet life (8) ── */
+petM('evolve', 'EVOLUTION!', 880, { e: 'star', b: 'sing', w: 'raise', r: E, x: 'halo' }, 'spin', 'gold', 'It evolved! More uptime, more majesty.', (c) => P(c, 'evolve'), 14000);
+petM('badge-unlock', 'Achievement unlocked', 870, { e: 'star', b: 'grin', w: 'raise', r: 'smug', x: 'crown' }, 'spin', 'gold', 'New badge earned. It will never let you forget this.', (c) => P(c, 'badge'), 12000);
+petM('boot', 'Garuda online!', 860, { e: 'shine', b: 'sing', w: 'flap', r: E, x: 'sun' }, 'flap', 'neon', 'Session unlocked. The eagle takes its perch.', (c) => P(c, 'boot'), 10000);
+petM('petted-lot', 'SO MUCH LOVE', 740, { e: 'heart', b: 'sing', w: 'flap', r: E, x: 'hearts' }, 'spin', 'hot', 'Five pets in ten seconds. It is blushing under the feathers.', (c) => P(c, 'petted-lot'), 8000);
+petM('petted', 'Petted', 730, { e: 'heart', b: 'shut', w: 'fold', r: 'smug', x: 'hearts' }, 'bounce', 'none', '*happy eagle noises*', (c) => P(c, 'petted'), 5000);
+petM('named', 'Proud of its name', 750, { e: 'shine', b: 'sing', w: 'raise', r: 'smug', x: 'crown' }, 'flap', 'gold', 'It has a NAME now. Say it with pride.', (c) => P(c, 'named'), 9000);
+petM('phoenix-glow', 'Phoenix glow', 315, { e: 'shine', b: 'shut', w: 'fold', r: 'smug', x: 'halo' }, 'pulse', 'hot', 'A week of active time. It has been reborn at least twice (server reboots do not count… or do they?).', (c) => c.stage === 'phoenix');
+petM('majestic-glow', 'Majestic', 314, { e: 'shine', b: 'shut', w: 'fold', r: 'smug', x: 'crown' }, 'float', 'gold', 'Three days of uptime energy. Regal. Aloof. Still eats crumbs from your terminal.', (c) => c.stage === 'majestic');
+/* ── ambient extras (5) ── */
+petM('tab-hoarder', 'Tab hoarder', 500, { e: 'wide', b: 'flat', w: 'fold', r: 'think', x: 'question' }, 'tilt', 'none', 'Six or more tabs open. It lost track of which one you care about.', (c) => c.tabs >= 6);
+petM('uptime-marathon', 'Uptime marathon', 400, { e: 'half', b: 'grin', w: 'fold', r: 'smug', x: 'halo' }, 'sway', 'gold', 'The machine has been up for a week+. Legendary stability.', (c) => c.uptimeS > 7 * 86400);
+petM('fresh-boot', 'Fresh boot', 400, { e: 'wide', b: 'open', w: 'flap', r: E, x: 'sun' }, 'hop', 'none', 'Server uptime under 5 minutes — everything is new and shiny.', (c) => c.uptimeS < 300);
+petM('vitals-warm', 'Warm and humming', 295, { e: 'happy', b: 'shut', w: 'fold', r: E, x: 'sun' }, 'sway', 'none', 'Everything nominal. Just a bird and its box, humming along.', (c) => c.cpu >= 0);
+
+/* Sort once: highest priority first (stable within equal prio = table order) */
+PET_MOODS.sort((a, b) => b.prio - a.prio);
+
+const PET_BADGES = [
+    { id: 'first-blood', name: 'First Blood', icon: '🩸', desc: 'Run your first sandbox command', test: (s) => s.c.sandboxes >= 1 },
+    { id: 'promoter', name: 'Promoter', icon: '⬆️', desc: 'Promote sandbox writes to the real home', test: (s) => s.c.promotes >= 1 },
+    { id: 'sandbox-vet', name: 'Sandbox Veteran', icon: '🧪', desc: 'Promote 5 times', test: (s) => s.c.promotes >= 5 },
+    { id: 'cmd-100', name: 'Centurion', icon: '💯', desc: '100 commands observed', test: (s) => s.c.cmds >= 100 },
+    { id: 'cmd-1000', name: 'Millennial Hawk', icon: '🎖️', desc: '1000 commands observed', test: (s) => s.c.cmds >= 1000 },
+    { id: 'night-owl', name: '3 AM Debugger', icon: '🌙', desc: 'Run a command between midnight and 5 AM', test: (s) => s.c.nightCmds >= 1 },
+    { id: 'survivor', name: 'Survivor', icon: '🛡️', desc: 'Live through 10 failed commands', test: (s) => s.c.fails >= 10 },
+    { id: 'taskmaster', name: 'Taskmaster', icon: '📋', desc: 'Launch 10 background tasks', test: (s) => s.c.tasks >= 10 },
+    { id: 'trigger-happy', name: 'Trigger Happy', icon: '⚡', desc: '10 triggers fired', test: (s) => s.c.triggers >= 10 },
+    { id: 'sharer', name: 'Sharer', icon: '🔗', desc: 'Create 5 share links', test: (s) => s.c.shares >= 5 },
+    { id: 'recorder', name: 'Archivist', icon: '🎥', desc: 'Save 3 recordings', test: (s) => s.c.recs >= 3 },
+    { id: 'upload-10', name: 'Pack Mule', icon: '📦', desc: 'Upload 10 files', test: (s) => s.c.uploads >= 10 },
+    { id: 'pet-lover', name: 'Fond of Feathers', icon: '🪶', desc: 'Pet the eagle 20 times', test: (s) => s.c.pets >= 20 },
+    { id: 'chatterbox', name: 'Chatterbox', icon: '💬', desc: '50 chat messages seen', test: (s) => s.c.chats >= 50 },
+    { id: 'marathon', name: 'Marathoner', icon: '🏃', desc: '4 h of cumulative active time', test: (s) => s.xpSec >= 14400 },
+    { id: 'phoenix-rise', name: 'Phoenix Rise', icon: '🔥', desc: 'Reach the Phoenix evolution stage', test: (s) => s.stageIdx >= 6 }
+];
+
+/* ── Garuda Pet: the eagle itself (inline SVG, parts swapped by the engine) ── */
+function petSVG() {
+    const eyePair = (inner) => `<g data-eyes>${['26', '38'].map((cx) => `<g transform="translate(${cx},20)">${inner}</g>`).join('')}</g>`;
+    const EYES = {
+        open: eyePair('<circle r="2.5" class="pk-f"/><circle cx="0.9" cy="-0.9" r="0.9" class="pk-h"/>'),
+        happy: eyePair('<path d="M-3 0.8 Q0 -3 3 0.8" class="pk-s" stroke-width="1.7" fill="none" stroke-linecap="round"/>'),
+        half: eyePair('<path d="M-2.5 0 A2.5 2.5 0 0 0 2.5 0 Z" class="pk-f" transform="scale(1,-1) translate(0,-0.4)"/><line x1="-3" y1="-0.2" x2="3" y2="-0.2" class="pk-s" stroke-width="1.2"/>'),
+        closed: eyePair('<path d="M-3 -0.8 Q0 2 3 -0.8" class="pk-s" stroke-width="1.7" fill="none" stroke-linecap="round"/>'),
+        wide: eyePair('<circle r="3.3" class="pk-f"/><circle cx="1.1" cy="-1.1" r="1" class="pk-h"/>'),
+        xx: eyePair('<path d="M-2.4 -2.4 L2.4 2.4 M2.4 -2.4 L-2.4 2.4" class="pk-s" stroke-width="1.8" stroke-linecap="round"/>'),
+        spiral: eyePair('<path d="M0 0 m0 -2.6 a2.6 2.6 0 1 1 -2.2 1.3 a1.7 1.7 0 1 1 1.5 0.8 a0.9 0.9 0 1 1 -0.6 -0.4" class="pk-s" stroke-width="1.1" fill="none"/>'),
+        heart: eyePair('<path d="M0 2.4 C-3.4 -0.4 -2.2 -3.2 0 -1.4 C2.2 -3.2 3.4 -0.4 0 2.4 Z" class="pk-d"/>'),
+        star: eyePair('<path d="M0 -3.2 L0.9 -0.9 L3.2 0 L0.9 0.9 L0 3.2 L-0.9 0.9 L-3.2 0 L-0.9 -0.9 Z" class="pk-g"/>'),
+        angry: eyePair('<circle r="2.4" class="pk-f"/><line x1="-3.4" y1="-3.6" x2="2.6" y2="-1.8" class="pk-s" stroke-width="1.7" stroke-linecap="round"/>'),
+        sleepy: eyePair('<path d="M-3 -0.4 Q0 1.6 3 -0.4" class="pk-s" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cy="2" r="0.7" class="pk-f"/>'),
+        dot: eyePair('<circle r="1.1" class="pk-f"/>'),
+        wink: `<g transform="translate(26,20)"><circle r="2.5" class="pk-f"/><circle cx="0.9" cy="-0.9" r="0.9" class="pk-h"/></g><g transform="translate(38,20)"><path d="M-3 0.4 Q0 -2.6 3 0.4" class="pk-s" stroke-width="1.7" fill="none" stroke-linecap="round"/></g>`,
+        shine: eyePair('<path d="M0 -3 L0.8 -0.8 L3 0 L0.8 0.8 L0 3 L-0.8 0.8 L-3 0 L-0.8 -0.8 Z" class="pk-f"/><circle cx="2" cy="-2" r="0.8" class="pk-h"/>'),
+        dead: eyePair('<path d="M-2.2 -2.2 L2.2 2.2 M2.2 -2.2 L-2.2 2.2" class="pk-s" stroke-width="1.6" stroke-linecap="round"/>')
+    };
+    const BROWS = {
+        angry: '<path d="M21 13 L29 15.6 M43 13 L35 15.6" class="pk-s" stroke-width="1.8" stroke-linecap="round"/>',
+        worry: '<path d="M21.5 14.4 Q25 12 29 14 M35 14 Q39 12 42.5 14.4" class="pk-s" stroke-width="1.5" fill="none" stroke-linecap="round"/>',
+        smug: '<path d="M35 13.4 Q39 11.6 42.6 13.2" class="pk-s" stroke-width="1.6" fill="none" stroke-linecap="round"/>',
+        think: '<path d="M21.5 14.6 L28.5 13 M40 11.6 L40.1 11.7" class="pk-s" stroke-width="1.5" stroke-linecap="round"/><circle cx="40" cy="11.8" r="1" class="pk-f"/>'
+    };
+    const BEAKS = {
+        shut: '<path d="M29.4 24.5 L35.4 24.5 Q34 28.5 32 29.5 Q30 28.5 29.4 24.5 Z" class="pk-a"/>',
+        open: '<path d="M29.4 24.2 L35.4 24.2 Q34.4 26.6 32.4 27.2 Q30.2 26.4 29.4 24.2 Z" class="pk-a"/><path d="M30 27.6 Q32 31 34.2 27.4 Q32.4 29 30 27.6 Z" class="pk-a2"/>',
+        sing: '<path d="M29.2 24 L35.6 24 Q34.6 26.4 32.4 27 Q30 26.2 29.2 24 Z" class="pk-a"/><ellipse cx="32.2" cy="29.4" rx="2.4" ry="2.8" class="pk-a2"/>',
+        flat: '<path d="M28.6 25 L36 25 L34.6 27.2 L30 27.2 Z" class="pk-a"/>',
+        grin: '<path d="M29.4 24.5 L35.4 24.5 Q34 28 32 29 Q30 28 29.4 24.5 Z" class="pk-a"/><path d="M29 26.6 Q32 29.6 35.4 26.2" class="pk-s" stroke-width="1.1" fill="none" stroke-linecap="round"/>'
+    };
+    const WINGS = {
+        fold: '<path d="M19.5 36 Q14 42 17.5 51 Q21 47 21.5 39 Z" class="pk-b"/><path d="M44.5 36 Q50 42 46.5 51 Q43 47 42.5 39 Z" class="pk-b"/>',
+        flap: '<path d="M19 35 Q9 27 6.5 33 Q12 41 20 43 Z" class="pk-b"/><path d="M45 35 Q55 27 57.5 33 Q52 41 44 43 Z" class="pk-b"/>',
+        raise: '<path d="M19 34 Q11 20 7 17 Q10 30 19 41 Z" class="pk-b"/><path d="M45 34 Q53 20 57 17 Q54 30 45 41 Z" class="pk-b"/>',
+        droop: '<path d="M19.5 38 Q15 47 18.5 55 Q22 50 21.8 42 Z" class="pk-b"/><path d="M44.5 38 Q49 47 45.5 55 Q42 50 42.2 42 Z" class="pk-b"/>',
+        cover: '<path d="M18 33 Q16 17 26 14 Q23 22 24 32 Z" class="pk-b"/><path d="M46 33 Q48 17 38 14 Q41 22 40 32 Z" class="pk-b"/>',
+        oneup: '<path d="M19.5 36 Q14 42 17.5 51 Q21 47 21.5 39 Z" class="pk-b"/><path d="M45 34 Q53 20 57 17 Q54 30 45 41 Z" class="pk-b"/>',
+        tuck: '<path d="M20 38 Q17 43 19.5 48 Q22 44 22 40 Z" class="pk-b"/><path d="M44 38 Q47 43 44.5 48 Q42 44 42 40 Z" class="pk-b"/>'
+    };
+    const EXTRAS = {
+        sweat: '<path d="M45 12 Q47.4 15.6 45 17.4 Q42.6 15.6 45 12 Z" class="pk-w"/>',
+        zzz: '<text x="44" y="12" class="pk-t" font-size="9" font-weight="700">z</text><text x="50" y="7" class="pk-t" font-size="6.5" font-weight="700">z</text>',
+        hearts: '<path d="M46 9 C43.6 6.8 44.6 4.6 46 6 C47.4 4.6 48.4 6.8 46 9 Z" class="pk-d"/><path d="M52 14 C50.2 12.4 51 10.8 52 11.8 C53 10.8 53.8 12.4 52 14 Z" class="pk-d"/>',
+        spark: '<path d="M47 8 L48 11 L51 12 L48 13 L47 16 L46 13 L43 12 L46 11 Z" class="pk-g"/>',
+        smoke: '<circle cx="45" cy="11" r="2.6" class="pk-sm"/><circle cx="49" cy="7" r="2" class="pk-sm"/><circle cx="43" cy="5.5" r="1.5" class="pk-sm"/>',
+        sick: '<path d="M45 13 Q47 16 45 17.6 Q43 16 45 13 Z" class="pk-sk"/><circle cx="21" cy="24" r="1.6" class="pk-sk" opacity="0.7"/>',
+        crown: '<path d="M24 8 L26.5 12 L29 6.5 L32 12 L35 6.5 L37.5 12 L40 8 L39 14 L25 14 Z" class="pk-g"/>',
+        halo: '<ellipse cx="32" cy="6.5" rx="8" ry="2.6" class="pk-hs"/>',
+        bolt: '<path d="M48 5 L43 13 L46.5 13 L44 20 L50.5 11 L47 11 L50 5 Z" class="pk-g"/>',
+        notes: '<g class="pk-f"><circle cx="46" cy="13" r="1.8"/><rect x="47.2" y="6" width="0.9" height="7"/><path d="M47.6 6 Q51 5 51.6 7.6 Q49 6.6 48.1 8.2 Z"/></g><g class="pk-f" opacity="0.7"><circle cx="54" cy="9" r="1.4"/><rect x="55" y="3.4" width="0.8" height="5.8"/></g>',
+        bang: '<g class="pk-d"><rect x="46.4" y="5" width="2" height="7" rx="1"/><circle cx="47.4" cy="14.4" r="1.3"/></g>',
+        question: '<text x="44" y="14" class="pk-t" font-size="12" font-weight="800" fill="var(--accent)">?</text>',
+        shield: '<path d="M13 40 L13 47 Q13 52 18 54 Q23 52 23 47 L23 40 Q18 38 13 40 Z" class="pk-sh"/>',
+        tears: '<path d="M24 25 Q25.6 28 24 29.4 Q22.4 28 24 25 Z" class="pk-w"/><path d="M40 25 Q41.6 28 40 29.4 Q38.4 28 40 25 Z" class="pk-w"/>',
+        confetti: '<rect x="14" y="6" width="2.6" height="2.6" class="pk-c1" transform="rotate(18 15 7)"/><rect x="46" y="5" width="2.6" height="2.6" class="pk-c2" transform="rotate(-14 47 6)"/><rect x="52" y="13" width="2.2" height="2.2" class="pk-c1" transform="rotate(30 53 14)"/><rect x="9" y="14" width="2.2" height="2.2" class="pk-c2" transform="rotate(-25 10 15)"/><rect x="30" y="2.5" width="2.4" height="2.4" class="pk-g" transform="rotate(12 31 3.5)"/>',
+        moon: '<path d="M48 5 A6 6 0 1 0 48 16 A7 7 0 1 1 48 5 Z" class="pk-g"/>',
+        sun: '<circle cx="48" cy="10" r="3.4" class="pk-g"/><path d="M48 3 L48 4.6 M48 15.4 L48 17 M41 10 L42.6 10 M53.4 10 L55 10 M43.4 5.4 L44.5 6.5 M51.5 13.5 L52.6 14.6 M52.6 5.4 L51.5 6.5 M44.5 13.5 L43.4 14.6" class="pk-s" stroke-width="1.2"/>',
+        coffee: '<g><path d="M44 10 h8 v5 q0 3 -4 3 q-4 0 -4 -3 Z" class="pk-b2"/><path d="M52 11 q3 0.4 3 2.4 q0 2 -3 2.2" class="pk-s" stroke-width="1.1" fill="none"/><path d="M46.4 7.6 Q47 6 46.4 4.8 M49.4 7.6 Q50 6 49.4 4.8" class="pk-s" stroke-width="0.9" fill="none" opacity="0.7"/></g>',
+        gear: '<g class="pk-st"><circle cx="48" cy="10" r="3.2" fill="none" stroke-width="1.6"/><circle cx="48" cy="10" r="1.1"/><path d="M48 5.4 L48 6.8 M48 13.2 L48 14.6 M43.4 10 L44.8 10 M51.2 10 L52.6 10 M44.8 6.8 L45.8 7.8 M50.2 12.2 L51.2 13.2 M51.2 6.8 L50.2 7.8 M45.8 12.2 L44.8 13.2" stroke-width="1.3"/></g>',
+        crumb: '<circle cx="28" cy="31" r="0.9" class="pk-a"/><circle cx="36" cy="31.6" r="0.8" class="pk-a"/><circle cx="24" cy="53" r="1" class="pk-a"/><circle cx="27" cy="55" r="0.8" class="pk-a"/><circle cx="40" cy="54" r="0.9" class="pk-a"/>',
+        mag: '<g class="pk-st"><circle cx="47" cy="9" r="4" fill="none" stroke-width="1.5"/><path d="M50 12 L54 16" stroke-width="1.8" stroke-linecap="round"/></g>'
+    };
+    const part = (prefix, map) => Object.keys(map).map((k) => `<g data-part="${prefix}-${k}" style="display:none">${map[k]}</g>`).join('');
+    return `<svg viewBox="0 0 64 64" class="pet-svg" aria-hidden="true">
+        <g data-part="stage-egg" style="display:none">
+            <ellipse cx="32" cy="37" rx="15" ry="19" class="pk-b"/>
+            <path d="M20 34 L25 37 L22.5 41 L28 44 L25 48 L31 50" class="pk-s" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.65"/>
+            <path d="M32 24 L36 32 L32 36 L28 32 Z" class="pk-a" opacity="0.8"/>
+        </g>
+        <g class="pet-bird">
+            <g data-part="stage-phoenix" style="display:none">
+                <path d="M16 48 Q10 38 15 28 Q16 38 21 44 Z" class="pk-fx1"/><path d="M48 48 Q54 38 49 28 Q48 38 43 44 Z" class="pk-fx1"/><path d="M32 6 Q28 12 32 16 Q36 12 32 6 Z" class="pk-fx2"/>
+            </g>
+            <g data-part="stage-majestic" style="display:none"><circle cx="32" cy="32" r="29" class="pk-maj"/></g>
+            <path d="M27 52 L24 60 L29 55 L32 61 L35 55 L40 60 L37 52 Z" class="pk-b"/>
+            ${part('w', WINGS)}
+            <ellipse cx="32" cy="41" rx="13" ry="14" class="pk-b"/>
+            <path d="M26 40 Q32 45 38 40 M27 46 Q32 50 37 46" class="pk-s" stroke-width="1" fill="none" opacity="0.4"/>
+            <circle cx="32" cy="20" r="10.5" class="pk-b"/>
+            <path d="M27 10.5 L25.5 4.5 L30 8.8 L32 3 L34 8.8 L38.5 4.5 L37 10.5 Z" class="pk-a"/>
+            ${part('e', EYES)}
+            ${part('r', BROWS)}
+            ${part('b', BEAKS)}
+            ${part('x', EXTRAS)}
+        </g>
+    </svg>`;
+}
+
+/* ── Garuda Pet: engine ── */
+const PET_TICK_MS = 1500;
+function petDefaultStore() { return { name: 'Garuda', xpSec: 0, stageIdx: 0, badges: {}, sfx: false, enabled: true, counters: {} }; }
+function petLoadStore() {
+    let s = null;
+    try { s = storeGet('gk_pet_v1', null); } catch (e) {}
+    const d = petDefaultStore();
+    if (!s || typeof s !== 'object') return d;
+    return Object.assign(d, s, { badges: Object.assign({}, s.badges || {}), counters: Object.assign({}, s.counters || {}) });
+}
+function petDefaultCtx() {
+    const d = new Date();
+    return {
+        now: Date.now(), cpu: 0, memPct: 0, diskPct: 0, load1: 0, cores: 4, uptimeS: 999,
+        hour: d.getHours(), dow: d.getDay(), idleMs: 0, wsOk: true, wsDownMs: 0,
+        viewers: 0, sessions: 1, runningTasks: 0, waitingTasks: 0, aiBusy: false, aiMode: 'ask',
+        recActive: false, sandboxActive: false, triggersArmed: 0, tabs: 1, stage: 'egg',
+        ev: {}, recentCmds: [], fails60: [], trig60: [], pets10: [], memTrend: [], cpuPrev: -1
+    };
+}
+let petState = null;
+try {
+    petState = {
+        store: petLoadStore(), ctx: petDefaultCtx(), moodId: null, mood: null,
+        history: [], timer: null, tickN: 0, lastActivity: Date.now(), wsDownSince: null,
+        prevTasks: new Map(), lastViewers: -1, outWin: { bytes: 0, since: Date.now() }, bubbleTimer: null
+    };
+} catch (e) { petState = null; }
+
+function petSaveStore() { try { storeSet('gk_pet_v1', petState.store); } catch (e) {} }
+function petStageIdx(xpSec) { let i = 0; for (let s = 0; s < PET_STAGES.length; s++) if (xpSec >= PET_STAGES[s].minSec) i = s; return i; }
+
+/* One entry point for every signal in the app. Cheap when the pet is off. */
+function petEvent(kind, data) {
+    if (!petState) return;
+    const st = petState, c = st.ctx;
+    c.now = Date.now();
+    st.lastActivity = c.now;
+    if (!st.store.enabled) return;
+    c.ev[kind] = { until: c.now + 8000, data: data || {} };
+    const k = st.store.counters;
+    const hr = c.hour;
+    switch (kind) {
+        case 'cmd-start':
+            c.recentCmds.push(c.now);
+            if (c.recentCmds.filter((t) => c.now - t < 10000).length >= 5) c.ev['cmd-spam'] = { until: c.now + 6000, data: {} };
+            break;
+        case 'cmd-ok':
+            k.cmds = (k.cmds || 0) + 1; c.fails60 = [];
+            if (hr < 5) k.nightCmds = (k.nightCmds || 0) + 1;
+            break;
+        case 'cmd-fail':
+            k.cmds = (k.cmds || 0) + 1; k.fails = (k.fails || 0) + 1;
+            if (hr < 5) k.nightCmds = (k.nightCmds || 0) + 1;
+            c.fails60.push(c.now);
+            if (c.fails60.filter((t) => c.now - t < 60000).length >= 2) c.ev['cmd-fail2'] = { until: c.now + 10000, data: {} };
+            break;
+        case 'trigger':
+            k.triggers = (k.triggers || 0) + 1;
+            c.trig60.push(c.now);
+            if (c.trig60.filter((t) => c.now - t < 60000).length >= 3) c.ev['trigger-spam'] = { until: c.now + 7000, data: {} };
+            break;
+        case 'task-start': k.tasks = (k.tasks || 0) + 1; break;
+        case 'sandbox-run': k.sandboxes = (k.sandboxes || 0) + 1; break;
+        case 'sandbox-promote': k.promotes = (k.promotes || 0) + 1; break;
+        case 'share': k.shares = (k.shares || 0) + 1; break;
+        case 'rec-save': k.recs = (k.recs || 0) + 1; break;
+        case 'upload': k.uploads = (k.uploads || 0) + 1; break;
+        case 'chat': k.chats = (k.chats || 0) + 1; break;
+        case 'petted':
+            k.pets = (k.pets || 0) + 1;
+            c.pets10.push(c.now);
+            if (c.pets10.filter((t) => c.now - t < 10000).length >= 5) c.ev['petted-lot'] = { until: c.now + 8000, data: {} };
+            break;
+        case 'ws-lost': st.wsDownSince = st.wsDownSince || c.now; c.wsOk = false; break;
+        case 'ws-ok': st.wsDownSince = null; c.wsOk = true; break;
+        default: break;
+    }
+    petCheckBadges();
+    petEvaluate();
+}
+
+/* Hot path — terminal output. One guarded assignment-level call per chunk. */
+function petNoteOutput(bytes) {
+    if (!petState || !petState.store.enabled) return;
+    const st = petState, now = Date.now();
+    st.lastActivity = now;
+    const w = st.outWin;
+    if (now - w.since > 5000) { w.since = now; w.bytes = 0; }
+    w.bytes += bytes || 0;
+    if (w.bytes > 150000) { w.bytes = 0; petEvent('huge-output', {}); }
+}
+
+/* /api/stats poll feeds the vitals */
+function petVitals(s) {
+    if (!petState || !s) return;
+    const c = petState.ctx;
+    c.cpu = (s.cpu && typeof s.cpu.usage === 'number') ? s.cpu.usage : 0;
+    c.memPct = (s.mem && s.mem.total) ? Math.round((s.mem.used / s.mem.total) * 100) : 0;
+    c.diskPct = (s.disk && s.disk.total) ? Math.round((s.disk.used / s.disk.total) * 100) : 0;
+    c.load1 = (s.cpu && s.cpu.load && s.cpu.load[0]) || 0;
+    c.cores = (s.cpu && s.cores) || 4;
+    c.uptimeS = s.uptime || 0;
+    c.sessions = s.sessions || 1;
+    if (s.viewers != null && s.viewers !== petState.lastViewers) {
+        if (s.viewers > petState.lastViewers && petState.lastViewers >= 0) petEvent('viewer-join', { n: s.viewers });
+        petState.lastViewers = s.viewers;
+    }
+    c.viewers = s.viewers || 0;
+    if (c.cpuPrev >= 0 && c.cpu - c.cpuPrev > 40 && c.cpuPrev < 30) petEvent('cpu-spike', { pct: Math.round(c.cpu) });
+    c.cpuPrev = c.cpu;
+    c.memTrend.push(c.memPct);
+    if (c.memTrend.length > 4) c.memTrend.shift();
+    if (c.memTrend.length === 4 && c.memPct > 60 && c.memTrend.every((v, i, a) => i === 0 || v >= a[i - 1] + 3)) petEvent('mem-climb', {});
+}
+
+/* Tasks poll feeds running/waiting + lifecycle events (transition-detected) */
+function petTasks(list) {
+    if (!petState || !Array.isArray(list)) return;
+    const c = petState.ctx;
+    let running = 0, waiting = 0;
+    const now = new Map();
+    for (const t of list) {
+        now.set(t.id, t);
+        if (t.alive) { running++; if (t.waiting) waiting++; }
+        const prev = petState.prevTasks.get(t.id);
+        if (prev && prev.alive && !t.alive) petEvent(t.exitCode === 0 ? 'task-ok' : 'task-fail', { name: t.name, exitCode: t.exitCode });
+        if (!prev && t.alive) { /* first sighting: counted via server journal; fire a soft event */ petEvent('task-start', { name: t.name }); }
+        if (t.alive && t.waiting && (!prev || !prev.waiting)) petEvent('task-waiting', { name: t.name });
+    }
+    if (petState.prevTasks.size && running === 0 && [...petState.prevTasks.values()].some((t) => t.alive)) petEvent('task-clear', {});
+    petState.prevTasks = now;
+    c.runningTasks = running;
+    c.waitingTasks = waiting;
+}
+
+function petCheckBadges() {
+    const st = petState.store;
+    const arg = { c: st.counters, xpSec: st.xpSec, stageIdx: st.stageIdx };
+    for (const b of PET_BADGES) {
+        if (st.badges[b.id]) continue;
+        let ok = false;
+        try { ok = b.test(arg); } catch (e) {}
+        if (ok) {
+            st.badges[b.id] = Date.now();
+            petSaveStore();
+            if (typeof showToast === 'function') showToast({ type: 'success', title: `${b.icon} Achievement: ${b.name}`, text: b.desc, duration: 5000 });
+            petEvent('badge', { badge: b.id });
+        }
+    }
+}
+
+function petTick() {
+    if (!petState) return;
+    const st = petState, c = st.ctx;
+    c.now = Date.now();
+    const d = new Date();
+    c.hour = d.getHours(); c.dow = d.getDay();
+    c.idleMs = c.now - st.lastActivity;
+    c.wsDownMs = c.wsOk ? 0 : (c.now - (st.wsDownSince || c.now));
+    try { c.tabs = Object.keys(tabs).length; } catch (e) {}
+    try { c.triggersArmed = (typeof getTriggers === 'function') ? getTriggers().length : 0; } catch (e) {}
+    try { c.aiMode = aiState.mode; c.aiBusy = aiState.busy; } catch (e) {}
+    if (st.store.enabled && !document.hidden && c.wsOk && typeof isViewerSession !== 'undefined' && !isViewerSession) {
+        st.store.xpSec += PET_TICK_MS / 1000;
+        const si = petStageIdx(st.store.xpSec);
+        if (si > st.store.stageIdx) {
+            st.store.stageIdx = si;
+            petSaveStore();
+            petEvent('evolve', { stage: PET_STAGES[si].id });
+            if (typeof showToast === 'function') showToast({ type: 'success', title: `🦅 ${st.store.name} evolved into ${PET_STAGES[si].name}!`, text: PET_STAGES[si].hint, duration: 6000 });
+        }
+    }
+    c.stage = PET_STAGES[st.store.stageIdx || 0].id;
+    for (const k of Object.keys(c.ev)) if (c.ev[k].until <= c.now) delete c.ev[k];
+    c.recentCmds = c.recentCmds.filter((t) => c.now - t < 10000);
+    c.fails60 = c.fails60.filter((t) => c.now - t < 60000);
+    c.trig60 = c.trig60.filter((t) => c.now - t < 60000);
+    c.pets10 = c.pets10.filter((t) => c.now - t < 10000);
+    petEvaluate();
+    if (++st.tickN % 20 === 0) petSaveStore(); // persist xp every ~30 s
+    if (typeof petPanelRefresh === 'function' && $('pet-modal') && !$('pet-modal').classList.contains('hidden')) petPanelRefresh();
+}
+
+/* Pure resolver — also the unit-test surface: petResolveMood({cpu:97}) → melt */
+function petResolveMood(raw) {
+    const c = Object.assign(petDefaultCtx(), raw || {});
+    c.now = c.now || Date.now();
+    if (!c.ev || typeof c.ev !== 'object') c.ev = {};
+    for (const m of PET_MOODS) {
+        try { if (m.test(c)) return m; } catch (e) {}
+    }
+    return PET_MOODS[PET_MOODS.length - 1];
+}
+
+function petEvaluate() {
+    if (!petState || !petState.store.enabled) return;
+    const mood = petResolveMood(petState.ctx);
+    if (mood.id !== petState.moodId) petApply(mood);
+}
+
+function petSfxFor(mood) {
+    if (/evolve|badge/.test(mood.id)) return 'fanfare';
+    if (mood.tint === 'hot' || mood.tint === 'storm' || /fail|melt|oom|full|lost|segfault|catastroph/.test(mood.id)) return 'bad';
+    if (/petted|named/.test(mood.id)) return 'blip';
+    if (/win|success|promote|done|ok$|quick|join|evolve/.test(mood.id)) return 'good';
+    return null;
+}
+
+function petApply(mood) {
+    const st = petState;
+    st.moodId = mood.id; st.mood = mood;
+    const root = $('pet-root');
+    if (root) {
+        root.dataset.mood = mood.id;
+        root.dataset.e = mood.pose.e; root.dataset.b = mood.pose.b; root.dataset.w = mood.pose.w;
+        root.dataset.r = mood.pose.r; root.dataset.x = mood.pose.x;
+        root.dataset.a = mood.anim; root.dataset.t = mood.tint;
+        root.dataset.stage = st.ctx.stage;
+        root.title = `${st.store.name} — ${mood.name}`;
+        root.setAttribute('aria-label', root.title);
+        petShowParts(root);
+    }
+    st.history.unshift({ t: Date.now(), id: mood.id, name: mood.name });
+    if (st.history.length > 40) st.history.length = 40;
+    if (mood.ttl > 0 && mood.line) petSay(mood.line);
+    const sfx = petSfxFor(mood);
+    if (sfx && st.store.sfx) petChirp(sfx);
+}
+
+function petShowParts(root) {
+    const want = { e: root.dataset.e, b: root.dataset.b, w: root.dataset.w, r: root.dataset.r, x: root.dataset.x };
+    const nodes = root.querySelectorAll('[data-part]');
+    for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const p = n.getAttribute('data-part') || '';
+        if (p.indexOf('stage-') === 0) { n.style.display = (p === 'stage-' + root.dataset.stage) ? '' : 'none'; continue; }
+        const pre = p.charAt(0);
+        n.style.display = (want[pre] && p === pre + '-' + want[pre]) ? '' : 'none';
+    }
+    const bird = root.querySelector('.pet-bird');
+    if (bird) bird.style.display = (root.dataset.stage === 'egg') ? 'none' : '';
+}
+
+function petSay(line) {
+    const b = $('pet-bubble');
+    if (!b || !petState.store.enabled) return;
+    b.textContent = String(line).slice(0, 120);
+    b.classList.remove('hidden');
+    if (petState.bubbleTimer) clearTimeout(petState.bubbleTimer);
+    petState.bubbleTimer = setTimeout(() => b.classList.add('hidden'), 3000);
+}
+
+function petChirp(kind) {
+    const ctx = (typeof ensureAudio === 'function') ? ensureAudio() : null;
+    if (!ctx) return;
+    try {
+        const now = ctx.currentTime;
+        const seq = kind === 'fanfare' ? [523, 659, 784, 1046] : kind === 'good' ? [660, 880] : kind === 'bad' ? [330, 220] : [880];
+        seq.forEach((f, i) => {
+            const o = ctx.createOscillator(), g = ctx.createGain();
+            o.type = kind === 'bad' ? 'sawtooth' : 'triangle';
+            o.frequency.value = f;
+            g.gain.setValueAtTime(0.0001, now + i * 0.09);
+            g.gain.exponentialRampToValueAtTime(0.03, now + i * 0.09 + 0.012);
+            g.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.09 + 0.09);
+            o.connect(g); g.connect(ctx.destination);
+            o.start(now + i * 0.09); o.stop(now + i * 0.09 + 0.1);
+        });
+    } catch (e) {}
+}
+
+function petInit() {
+    if (!petState) return;
+    const root = $('pet-root');
+    if (!root || root.dataset.built === '1') { if (petState.timer == null) petState.timer = setInterval(petTick, PET_TICK_MS); return; }
+    root.innerHTML = petSVG();
+    root.dataset.built = '1';
+    root.dataset.stage = PET_STAGES[petState.store.stageIdx || 0].id;
+    if (!petState.store.enabled) root.classList.add('hidden');
+    petShowParts(root);
+    if (petState.timer) clearInterval(petState.timer);
+    petState.timer = setInterval(petTick, PET_TICK_MS);
+    petEvent('boot', {});
+    petEvaluate();
+}
+
+/* ── Garuda Pet: panel ── */
+function openPetModal() {
+    const m = $('pet-modal');
+    if (!m || !petState) return;
+    m.classList.remove('hidden');
+    petPanelRefresh();
+}
+function petPanelRefresh() {
+    if (!petState) return;
+    const st = petState, c = st.ctx, s = st.store;
+    const stage = PET_STAGES[s.stageIdx || 0];
+    const next = PET_STAGES[(s.stageIdx || 0) + 1];
+    const setTxt = (id, v) => { const n = $(id); if (n) n.textContent = v; };
+    setTxt('pet-panel-name-label', s.name);
+    setTxt('pet-panel-stage', `${stage.name} — ${stage.hint}`);
+    const mood = st.mood || petResolveMood(c);
+    setTxt('pet-panel-mood', mood.name);
+    setTxt('pet-panel-mood-line', mood.line);
+    const bar = (id, pct) => { const n = $(id); if (n) n.style.width = Math.max(0, Math.min(100, pct || 0)) + '%'; };
+    bar('pet-vitals-cpu', c.cpu);
+    bar('pet-vitals-mem', c.memPct);
+    bar('pet-vitals-disk', c.diskPct);
+    setTxt('pet-vitals-cpu-t', Math.round(c.cpu) + '%');
+    setTxt('pet-vitals-mem-t', Math.round(c.memPct) + '%');
+    setTxt('pet-vitals-disk-t', Math.round(c.diskPct) + '%');
+    if (next) {
+        const span = next.minSec - stage.minSec;
+        bar('pet-stage-bar', ((s.xpSec - stage.minSec) / span) * 100);
+        setTxt('pet-stage-t', `${Math.floor(s.xpSec / 60)} min active — next: ${next.name} at ${next.minSec >= 3600 ? (next.minSec / 3600) + ' h' : (next.minSec / 60) + ' min'}`);
+    } else {
+        bar('pet-stage-bar', 100);
+        setTxt('pet-stage-t', `${Math.floor(s.xpSec / 3600)} h active — final form reached 🔥`);
+    }
+    const ni = $('pet-name-input'); if (ni && document.activeElement !== ni) ni.value = s.name;
+    const en = $('pet-enabled-chk'); if (en) en.checked = !!s.enabled;
+    const sf = $('pet-sfx-chk'); if (sf) sf.checked = !!s.sfx;
+    const badges = $('pet-badges');
+    if (badges) {
+        badges.innerHTML = PET_BADGES.map((b) => {
+            const got = !!s.badges[b.id];
+            return `<span class="pet-badge${got ? '' : ' locked'}" title="${escHtml(b.desc)}${got ? ' — earned ' + new Date(s.badges[b.id]).toLocaleDateString() : ''}">${b.icon}<span>${escHtml(b.name)}</span></span>`;
+        }).join('');
+    }
+    const hist = $('pet-mood-history');
+    if (hist) {
+        hist.innerHTML = st.history.slice(0, 14).map((h) => `<div class="pet-hist-row"><span class="pet-hist-t">${new Date(h.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span><span>${escHtml(h.name)}</span></div>`).join('') || '<div class="setting-subtitle">No mood changes yet.</div>';
+    }
+    setTxt('pet-mood-count', `${PET_MOODS.length} moods · ${Object.keys(s.badges).length}/${PET_BADGES.length} badges`);
+}
+function petSaveSettings() {
+    if (!petState) return;
+    const s = petState.store;
+    const ni = $('pet-name-input');
+    const newName = ni ? String(ni.value || '').trim().slice(0, 24) : s.name;
+    const renamed = newName && newName !== s.name;
+    if (newName) s.name = newName;
+    const en = $('pet-enabled-chk'); if (en) s.enabled = !!en.checked;
+    const sf = $('pet-sfx-chk'); if (sf) s.sfx = !!sf.checked;
+    petSaveStore();
+    const root = $('pet-root');
+    if (root) root.classList.toggle('hidden', !s.enabled);
+    if (renamed) petEvent('named', {});
+    if (typeof showToast === 'function') showToast({ type: 'success', title: 'Pet settings saved', text: renamed ? `${s.name} is proud of the name.` : '', duration: 2500, silent: !renamed });
+    petEvaluate();
+    petPanelRefresh();
+}
+
+/* ─────────────── 5.6: Mission Control "Today" — the 24 h neon scrubber ───────────────
+   Reads the server day-journal (/api/today) and draws every event of the day on a
+   timeline: commands, tasks, triggers, sandbox runs, AI sessions, files, shares,
+   connections. Click an event → detail card with contextual actions (replay the
+   moment from the ring buffer, open the task log, re-run, explain with AI). */
+
+const TD_CATS = {
+    cmd: { lane: 0, cls: 'td-cmd', label: 'command' },
+    task: { lane: 1, cls: 'td-task', label: 'task' },
+    trigger: { lane: 2, cls: 'td-trigger', label: 'trigger' },
+    sandbox: { lane: 3, cls: 'td-sandbox', label: 'sandbox' },
+    ai: { lane: 4, cls: 'td-ai', label: 'AI' },
+    file: { lane: 5, cls: 'td-file', label: 'file' },
+    share: { lane: 5, cls: 'td-share', label: 'share' },
+    rec: { lane: 5, cls: 'td-rec', label: 'recording' },
+    conn: { lane: 6, cls: 'td-conn', label: 'connection' },
+    auth: { lane: 6, cls: 'td-auth', label: 'auth' },
+    social: { lane: 6, cls: 'td-social', label: 'social' },
+    shell: { lane: 6, cls: 'td-shell', label: 'shell' }
+};
+let todayState = { timer: null, events: [], date: null, sel: null, rendered: false, lastLen: -1 };
+
+/* Client-observed events → server journal (fire-and-forget, never throws) */
+function todayJournal(cat, kind, title, meta) {
+    try {
+        if (typeof token === 'undefined' || !token || (typeof isViewerSession !== 'undefined' && isViewerSession)) return;
+        api('/api/today/event', { method: 'POST', body: { cat, kind, title: String(title == null ? '' : title).slice(0, 140), meta: meta || null } }).catch(() => {});
+    } catch (e) {}
+}
+
+async function openTodayModal() {
+    const m = $('today-modal');
+    if (!m) return;
+    m.classList.remove('hidden');
+    await todayRefresh(true);
+    if (!todayState.timer) todayState.timer = setInterval(() => todayRefresh(false), 3000);
+}
+function closeTodayModal() {
+    const m = $('today-modal');
+    if (m) m.classList.add('hidden');
+    if (todayState.timer) { clearInterval(todayState.timer); todayState.timer = null; }
+}
+async function todayRefresh(force) {
+    let d = null;
+    try { d = await api('/api/today'); } catch (e) { return; }
+    if (!d || !d.date) return;
+    todayState.date = d.date;
+    const evs = Array.isArray(d.events) ? d.events : [];
+    if (force || evs.length !== todayState.lastLen) {
+        todayState.events = evs;
+        todayState.lastLen = evs.length;
+        todayRenderStrip();
+        todayRenderList();
+        todayState.rendered = true;
+    }
+    const dt = $('today-date');
+    if (dt) dt.textContent = d.date === todayLocalDate() ? 'today' : d.date;
+    todayMoveNow();
+}
+function todayLocalDate() {
+    const n = new Date(), p = (x) => String(x).padStart(2, '0');
+    return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+}
+function todayMidnight() { return new Date((todayState.date || todayLocalDate()) + 'T00:00:00').getTime(); }
+function todayPct(ts) { return Math.max(0, Math.min(100, ((ts - todayMidnight()) / 86400000) * 100)); }
+function todayHHMMSS(ts) { return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+
+function todayRenderStrip() {
+    const strip = $('today-strip');
+    if (!strip) return;
+    let html = '<div class="td-ruler">';
+    for (let h = 0; h <= 24; h += 3) html += `<span class="td-tick" style="left:${(h / 24) * 100}%">${String(h % 24).padStart(2, '0')}</span>`;
+    html += '</div><div class="td-lanes">';
+    for (let l = 0; l < 7; l++) html += `<div class="td-lane" data-lane="${l}"></div>`;
+    html += '</div>';
+    for (let i = 0; i < todayState.events.length; i++) {
+        const e = todayState.events[i];
+        const cat = TD_CATS[e.cat] || TD_CATS.conn;
+        const fail = (e.cat === 'cmd' && e.kind !== 'ok') || e.kind === 'fail' || e.kind === 'exit' && e.meta && e.meta.exitCode;
+        html += `<span class="td-dot ${cat.cls}${fail ? ' td-fail' : ''}" data-idx="${i}" style="left:${todayPct(e.ts).toFixed(3)}%;top:${4 + cat.lane * 10}px" title="${todayHHMMSS(e.ts)} · ${escHtml(e.title || e.kind)}"></span>`;
+    }
+    html += '<span class="td-now hidden" id="td-now"></span>';
+    strip.innerHTML = html;
+    strip.onclick = (ev) => {
+        const dot = ev.target.closest ? ev.target.closest('.td-dot') : null;
+        if (dot) todaySelect(parseInt(dot.dataset.idx, 10));
+    };
+}
+function todayMoveNow() {
+    const now = $('td-now');
+    if (!now) return;
+    if ((todayState.date || '') !== todayLocalDate()) { now.classList.add('hidden'); return; }
+    now.classList.remove('hidden');
+    now.style.left = todayPct(Date.now()).toFixed(3) + '%';
+}
+function todayRenderList() {
+    const list = $('today-list');
+    if (!list) return;
+    const evs = todayState.events.slice(-250).reverse();
+    if (!evs.length) { list.innerHTML = '<div class="setting-subtitle">Nothing logged yet today. Run something!</div>'; return; }
+    list.innerHTML = evs.map((e) => {
+        const cat = TD_CATS[e.cat] || TD_CATS.conn;
+        const idx = todayState.events.indexOf(e);
+        const metaBits = [];
+        if (e.meta) {
+            if (e.meta.exit != null) metaBits.push('exit ' + e.meta.exit);
+            if (e.meta.exitCode != null) metaBits.push('exit ' + e.meta.exitCode);
+            if (e.meta.durMs != null) metaBits.push((e.meta.durMs / 1000).toFixed(1) + 's');
+            if (e.meta.count != null) metaBits.push('×' + e.meta.count);
+        }
+        return `<div class="td-row" data-idx="${idx}"><span class="td-row-t">${todayHHMMSS(e.ts)}</span><span class="td-chip ${cat.cls}">${cat.label}</span><span class="td-row-title">${escHtml(e.title || e.kind)}</span><span class="td-row-meta">${escHtml(metaBits.join(' · '))}</span></div>`;
+    }).join('');
+    list.onclick = (ev) => {
+        const row = ev.target.closest ? ev.target.closest('.td-row') : null;
+        if (row) todaySelect(parseInt(row.dataset.idx, 10));
+    };
+}
+function todaySelect(i) {
+    const e = todayState.events[i];
+    const d = $('today-detail');
+    if (!e || !d) return;
+    todayState.sel = e;
+    const cat = TD_CATS[e.cat] || TD_CATS.conn;
+    const meta = e.meta || {};
+    const metaHtml = Object.keys(meta).map((k) => `<span class="td-meta-k">${escHtml(k)}</span><span class="td-meta-v">${escHtml(String(meta[k]))}</span>`).join('');
+    const canReplay = (Date.now() - e.ts) < 60000;
+    const canRerun = e.cat === 'cmd' && e.title;
+    const canLog = !!meta.taskId;
+    d.innerHTML = `
+        <div class="td-detail-head">
+            <span class="td-chip ${cat.cls}">${cat.label} · ${escHtml(e.kind)}</span>
+            <span class="td-detail-time">${todayHHMMSS(e.ts)}</span>
+            <button class="icon-btn" data-action="td-close" title="Close details"><svg class="ic"><use href="#i-x"></use></svg></button>
+        </div>
+        <div class="td-detail-title">${escHtml(e.title || '—')}</div>
+        ${metaHtml ? `<div class="td-detail-meta">${metaHtml}</div>` : ''}
+        <div class="share-actions">
+            <button class="btn-mini" data-action="td-replay" ${canReplay ? '' : 'disabled'} title="${canReplay ? 'Replay the last 60 s ring buffer' : 'Replay window (60 s ring) has passed'}">▶ Replay moment</button>
+            ${canLog ? '<button class="btn-mini" data-action="td-tasklog">📄 Task log</button>' : ''}
+            ${canRerun ? '<button class="btn-mini" data-action="td-rerun">↻ Re-run</button>' : ''}
+            ${canRerun ? '<button class="btn-mini" data-action="td-explain">🧠 Explain with AI</button>' : ''}
+        </div>`;
+    d.classList.remove('hidden');
 }

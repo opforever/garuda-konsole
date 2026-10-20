@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.5.1';
+const APP_VERSION = '5.6.0';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -702,6 +702,7 @@ async function speakText(text, opts) {
         .slice(0, 1500);
     if (!clean) return false;
     const gen = ++speakGeneration;
+    if (typeof petEvent === 'function') petEvent('voice-talk', {});
     try {
         if (speakAudio) { try { speakAudio.pause(); speakAudio.src = ''; } catch (e) {} speakAudio = null; }
         const res = await fetch('/api/ai/speech', {
@@ -955,6 +956,7 @@ async function enterApp(silent) {
     initViewportEngine();
     if (typeof startClock === 'function') startClock();
     if (typeof startStatsPoller === 'function') startStatsPoller();
+    if (typeof petInit === 'function') petInit();
     startLatencyPinger();
     startGitPoller();
 
@@ -1212,6 +1214,7 @@ function bindTerminalEvents(tab) {
             void termEl.offsetWidth;
             termEl.classList.add('bell-ring');
             buzz(20);
+            if (typeof petEvent === 'function') petEvent('bell', {});
         });
     } catch (e) {}
 
@@ -1373,9 +1376,21 @@ function handleOsc133(tab, data) {
         } catch (e) { tab.oscMark = null; }
         const m = d.match(/cmdline_url=([^;\x07]+)/);
         if (m) { try { tab.oscCmd = decodeURIComponent(m[1]); } catch (e) { tab.oscCmd = m[1]; } }
+        /* 5.6: pet + Mission Control — command start */
+        tab.sawOsc133 = true;
+        tab.oscStartAt = Date.now();
+        if (typeof petEvent === 'function') {
+            petEvent('cmd-start', { cmd: tab.oscCmd || '' });
+            if (/^\s*(sudo|doas|pkexec)\b/.test(tab.oscCmd || '')) petEvent('sudo', { cmd: tab.oscCmd || '' });
+        }
     } else if (d.charAt(0) === 'D') {
         const status = parseInt(d.slice(2), 10) || 0;
         if (status !== 0) failEvent(tab, tab.oscCmd || '(command)', oscSlice(tab), status);
+        /* 5.6: command end — pet mood + day journal (duration when C was seen) */
+        const durMs = tab.oscStartAt ? Date.now() - tab.oscStartAt : null;
+        tab.oscStartAt = null;
+        if (typeof petEvent === 'function') petEvent(status === 0 ? 'cmd-ok' : 'cmd-fail', { cmd: tab.oscCmd || '', status, durMs });
+        if (typeof todayJournal === 'function') todayJournal('cmd', status === 0 ? 'ok' : 'fail', tab.oscCmd || '(command)', { exit: status, durMs, tab: tab.title });
         tab.oscMark = null;
     }
     return true;
@@ -1935,6 +1950,7 @@ function handleHostCtrl(tab, ctrl) {
             break;
         }
         case 'chat': {
+            if (typeof petEvent === 'function') petEvent('chat', {});
             if (typeof addChatMessage === 'function') {
                 addChatMessage({
                     from: ctrl.from, text: ctrl.text, t: ctrl.t,
@@ -2047,6 +2063,7 @@ async function refreshGitChip(tabId) {
 }
 
 function handleTerminalOutput(tab, data) {
+    if (typeof petNoteOutput === 'function') petNoteOutput(data.length);
     /* Frame-batched writes keep huge outputs fluid.
        rAF stalls in hidden tabs, so a timer always backs it up — this is what
        keeps completion notifications & triggers working in the background. */
@@ -2087,6 +2104,11 @@ function onOutputSideEffects(tab) {
         const settings = getSettings();
         if (duration >= 2000) {
             bumpInsight('longest', duration, tab.cmdLast || '');
+            /* 5.6: shells without OSC-133 still feed the pet + day journal */
+            if (!tab.sawOsc133) {
+                if (typeof petEvent === 'function') petEvent('cmd-ok', { cmd: tab.cmdLast || '', durMs: duration, soft: true });
+                if (typeof todayJournal === 'function') todayJournal('cmd', 'done', tab.cmdLast || '(command)', { durMs: duration, tab: tab.title });
+            }
             logActivity(duration >= 10000 ? 'warn' : 'success',
                 `Command finished in "${tab.title}" after ${(duration / 1000).toFixed(1)}s${tab.cmdLast ? ': ' + tab.cmdLast.slice(0, 60) : ''}`);
             if (document.hidden && settings.completionNotifications) {
@@ -2176,6 +2198,8 @@ function fireTrigger(trig, tab, line) {
         markNotifyTag('trigger:' + trig.id);
     }
     bumpInsight('triggers', 1);
+    if (typeof petEvent === 'function') petEvent('trigger', { name: trig.name || 'trigger', line: short });
+    if (typeof todayJournal === 'function') todayJournal('trigger', 'fired', trig.name || 'trigger', { tab: tab.title, line: short.slice(0, 120) });
     logActivity('warn', `Trigger "${trig.name}" fired in "${tab.title}": ${short.slice(0, 80)}`);
     if (tab.id !== activeTabId) tab.activityEl.classList.remove('hidden');
 }
@@ -2260,6 +2284,7 @@ function startRecording(tabId) {
     if (!tab || tab.recording) return;
     tab.recording = { startedAt: Date.now(), chunks: [], bytes: 0 };
     logActivity('info', `Recording started for "${tab.title}"`);
+    if (typeof petEvent === 'function') petEvent('rec-start', {});
     updateRecordingUI();
     showToast({ type: 'success', title: 'Recording started', text: `${tab.title} — output is being captured (max 8 MB)`, duration: 2800 });
     buzz(14);
@@ -2271,11 +2296,12 @@ function stopRecording(tabId, auto) {
     const rec = tab.recording;
     tab.recording = null;
     tab.lastRecording = { title: tab.title, startedAt: rec.startedAt, stoppedAt: Date.now(), chunks: rec.chunks };
+    if (typeof petEvent === 'function') petEvent('rec-stop', {});
     updateRecordingUI();
     /* 5.2.1: persist to the server-side library (~/Rec_jsonl) */
     if (rec.chunks.length && getSettings().autoSaveRecordings !== false && !isViewerSession && token) {
         api('/api/recordings', { method: 'POST', body: { title: `${tab.title} — ${new Date(rec.startedAt).toLocaleString()}`, chunks: rec.chunks } })
-            .then((r) => showToast({ type: 'success', title: 'Recording saved', text: `${r.name} → server ~/Rec_jsonl`, duration: 3200 }))
+            .then((r) => { if (typeof petEvent === 'function') petEvent('rec-save', {}); return showToast({ type: 'success', title: 'Recording saved', text: `${r.name} → server ~/Rec_jsonl`, duration: 3200 }); })
             .catch(() => showToast({ type: 'warn', title: 'Recording not saved', text: 'Server recording library unavailable.', duration: 3200 }));
     }
     if (auto) {
@@ -2475,11 +2501,13 @@ async function aiChatWithRetry(myGen) {
             if (rateLimited && attempt === 0 && !aiState.stopped) {
                 const waitMs = e.retryAfter ? clamp(e.retryAfter * 1000, 2000, 90000) : aiRetryDelayMs;
                 aiPush({ kind: 'sys', text: `Groq token limit reached — waiting ${Math.round(waitMs / 1000)}s, then retrying… (press Stop to abort)` });
+                if (typeof petEvent === 'function') petEvent('ai-ratelimit', {});
                 const waited = await sleepInterruptible(waitMs, myGen);
                 if (!waited) return null;
                 continue;
             }
             aiPush({ kind: 'sys', level: 'error', text: 'AI error: ' + (e.message || e) + (e.hint ? ' — ' + e.hint : (e.status === 502 ? ' — check Settings → AI Guide (key/model).' : '')) });
+            if (typeof petEvent === 'function') petEvent('ai-error', {});
             return null;
         }
     }
@@ -2589,6 +2617,7 @@ function aiSetThinking(on) {
 function aiAskApproval(cmd, dangerWhy) {
     return new Promise((resolve) => {
         const id = aiPush({ kind: 'cmd', cmd, state: 'pending', danger: dangerWhy || null });
+        if (typeof petEvent === 'function') petEvent('ai-cmd-pending', { cmd: String(cmd).slice(0, 120) });
         aiState.pending = { id, resolve };
         /* Visibility guarantee: an approval card must never sit unseen */
         if (typeof ensureAiDrawerVisible === 'function') ensureAiDrawerVisible();
@@ -2630,6 +2659,7 @@ async function aiSend(text) {
     aiState.stopped = false;
     aiState.steps = 0;
     aiState.tabId = tab.id;
+    if (typeof petEvent === 'function') petEvent('ai-start', {});
     if (typeof syncAiBusyUI === 'function') syncAiBusyUI();
 
     aiPush({ kind: 'user', text: clean });
@@ -2640,10 +2670,12 @@ async function aiSend(text) {
         await agentLoop(myGen);
     } catch (e) {
         if (aiState.gen === myGen) aiPush({ kind: 'sys', level: 'error', text: e.message || String(e) });
+        if (aiState.gen === myGen && typeof petEvent === 'function') petEvent('ai-error', {});
     } finally {
         if (aiState.gen === myGen) {
             aiState.busy = false;
             aiState.pending = null;
+            if (typeof petEvent === 'function') petEvent('ai-done', {});
             if (typeof syncAiBusyUI === 'function') syncAiBusyUI();
         }
     }
@@ -2830,6 +2862,7 @@ function setConnUI(state) {
         dot.classList.add(state === 'ok' ? 'conn-ok' : state === 'bad' ? 'conn-bad' : 'conn-wait');
     }
     if (txt) txt.textContent = state === 'ok' ? 'connected' : state === 'bad' ? 'reconnecting…' : 'idle';
+    if (typeof petEvent === 'function') petEvent(state === 'bad' ? 'ws-lost' : state === 'ok' ? 'ws-ok' : 'noop', {});
 }
 
 function startLatencyPinger() {
@@ -2855,6 +2888,7 @@ async function refreshShareStatuses() {
 function updatePingChip(ms) {
     const chip = $('ping-chip');
     if (chip) chip.textContent = ms != null ? `${ms} ms` : '—';
+    if (ms != null && ms > 300 && typeof petEvent === 'function') petEvent('lag', { ms });
 }
 
 function updateViewersChip() {
@@ -3156,6 +3190,7 @@ function uploadFiles(fileList) {
         if (xhr.status === 200 && body && body.success) {
             const names = (body.saved || []).join(', ') || label;
             showToast({ id: 'upload-progress', type: 'success', title: 'Upload complete', text: `${names} → ${body.folder || 'folder'}` });
+            if (typeof petEvent === 'function') petEvent('upload', { n: (body.saved || []).length });
             playUI('success');
             if (dest === 'files' && typeof loadFiles === 'function') loadFiles();
         } else {

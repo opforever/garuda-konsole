@@ -1,8 +1,8 @@
-# Garuda Konsole 5.5.1 🦅
+# Garuda Konsole 5.6.0 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.5.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-494%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.6.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-520%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,59 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 🦅 What's new in 5.6 — Garuda Pet & Mission Control
+
+1. **Garuda Pet — the tamagotchi that IS your server.** A neon eagle perches in
+   the status bar (tap it). Its mood resolves from *everything*: **115 named
+   moods** driven by CPU/RAM/disk bands (+ spike & climb detection), load
+   average, command exits (quick wins, long builds, segfaults, catastrophic
+   kills, Ctrl-C, sudo crown, bell, output firehose), triggers, tasks
+   (juggling / waiting-for-input / schedules), sandbox runs, promotes &
+   discards, the AI agent (thinking, approval-waiting, rate-limit coffee,
+   auto-mode helmet, voice talk/listen), viewers, chat, shares, uploads,
+   deletes, downloads, recordings, connection drops & reconnect relief, ping
+   lag, time of day (3 AM debugger, night owl, weekend chill, Monday blues),
+   idle naps, tab hoarding, uptime marathons and fresh boots. One pure
+   resolver (`petResolveMood(ctx)`) picks the highest-priority matching mood;
+   transient events decay via TTLs. Speech bubbles, optional chirps, 7 tints
+   and 16 animations.
+   - **Evolution** by cumulative active time: Egg → Chick → Fledgling →
+     Juvenile → Adult → Majestic → Phoenix (egg shell, crown aura, flame
+     wings as stage visuals).
+   - **16 achievements** (First Blood, Centurion, 3 AM Debugger, Survivor,
+     Phoenix Rise…) with unlock toasts.
+   - **Pet panel**: live vitals bars, mood history, badge grid, rename the
+     bird, disable/chirps toggles, Mission Control link. XP, stage, name &
+     badges persist; `reduce-motion` and OS preference silence the
+     animations. Off-switch included — it is a pet, not a pest.
+2. **Mission Control — the "today" scrubber.** The server journals every
+   notable event — commands with exit code & duration (OSC-133, plus an
+   idle-based fallback for shells without it), task lifecycle & waiting
+   prompts, trigger fires, sandbox run/promote/discard, AI sessions,
+   uploads/deletes, share creation, recording saves, logins, terminal
+   connect/disconnect, viewer joins/leaves, shell deaths — into per-day JSONL
+   (`~/GarudaToday/`, 7-day retention, 8 MB/day cap, flood-guarded client
+   posts via `/api/today/event`). Click the **status-bar clock** (or the
+   palette) → a 24 h neon strip: category lanes, colored dots, red glow on
+   failures, live now-marker, hour ruler; legend + newest-first event log
+   below. Selecting an event opens a detail card with contextual actions:
+   **replay the moment** from the 60 s ring buffer, **open the task log**,
+   **re-run the command**, **explain with AI**.
+3. **Freebie bug fix — cwd race**: a brand-new session's `init` control could
+   report the *server's* cwd (the `/proc/<pid>/cwd` readlink raced the pty
+   child's `chdir`), breaking profile-tab cwd under load. A 750 ms grace
+   window makes the requested `lastCwd` authoritative; caught deterministically
+   by the E2E suite and verified with a raw-WS probe.
+
+Tests: +9 API (journal auth/shape/post/validation/dates, task + login events
+journaled server-side), +17 frontend (115-mood catalog & unique ids, resolver
+unit checks — melt/oom/disk-full/segfault/waiting/ws-lost —, live mood DOM,
+panel render, today strip lanes/positions/detail/journal POST), new static
+guards (≥12 journal hooks, ≥100 moods, OSC→pet+journal wiring, pet/today
+markup & styles). Visual-verified in headless Chromium: status bar egg &
+bird, panel, Mission Control strip — **zero console errors**.
+Suite: **API 211, frontend 309**, statics green. Version lockstep 5.6.0.
 
 ## 🩹 What's new in 5.5.1 — branch sandbox that actually sandboxes
 

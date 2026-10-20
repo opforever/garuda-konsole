@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-    <link rel="stylesheet" href="style.css?v=5.5.1" />
+    <link rel="stylesheet" href="style.css?v=5.6.0" />
 </head>
 <body>
 
@@ -513,10 +513,14 @@
             <span class="sb-chip sb-chip-live hidden" id="viewers-chip" data-action="share" title="Live viewers">
                 <span class="live-dot"></span><span id="viewers-chip-count">0</span> watching
             </span>
+            <span class="pet-wrap" id="pet-wrap">
+                <span id="pet-bubble" class="pet-bubble hidden" aria-hidden="true"></span>
+                <button type="button" id="pet-root" class="pet-root" data-action="pet-toggle" title="Garuda pet" aria-label="Garuda pet — open moods &amp; badges"></button>
+            </span>
             <span class="sb-chip" id="cpu-chip" data-action="stats" title="CPU usage">cpu —</span>
             <span class="sb-chip" id="mem-chip" data-action="stats" title="Memory usage">mem —</span>
             <span class="sb-chip" id="font-chip" data-action="settings" title="Font size — open settings">14px</span>
-            <span class="sb-chip" id="clock-chip" title="Local time">--:--:--</span>
+            <span class="sb-chip" id="clock-chip" data-action="today-open" title="Mission Control: today — click for the 24 h timeline">--:--:--</span>
         </div>
     </footer>
 
@@ -1372,6 +1376,72 @@
     </div>
 </div>
 
+<!-- Garuda Pet panel (5.6) -->
+<div id="pet-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="pet-close"></div>
+    <div class="modal-sheet sheet-wide" role="dialog" aria-label="Garuda pet">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3>🦅 <span id="pet-panel-name-label">Garuda</span></h3>
+            <div class="drawer-header-actions"><button class="icon-btn" data-action="pet-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button></div>
+        </div>
+        <div class="modal-body">
+            <div class="pet-mood-box">
+                <div class="pet-mood-name" id="pet-panel-mood">—</div>
+                <div class="setting-subtitle" id="pet-panel-mood-line">—</div>
+            </div>
+            <div class="stat-row-head"><span>Vitals</span><span id="pet-mood-count">—</span></div>
+            <div class="pet-vitals">
+                <div class="pet-vital"><span>CPU</span><span class="pet-bar"><i id="pet-vitals-cpu"></i></span><b id="pet-vitals-cpu-t">—</b></div>
+                <div class="pet-vital"><span>RAM</span><span class="pet-bar"><i id="pet-vitals-mem"></i></span><b id="pet-vitals-mem-t">—</b></div>
+                <div class="pet-vital"><span>Disk</span><span class="pet-bar"><i id="pet-vitals-disk"></i></span><b id="pet-vitals-disk-t">—</b></div>
+            </div>
+            <div class="stat-row-head"><span>Evolution</span></div>
+            <div class="setting-subtitle" id="pet-panel-stage">—</div>
+            <div class="pet-bar pet-stage-bar"><i id="pet-stage-bar"></i></div>
+            <div class="setting-subtitle" id="pet-stage-t">—</div>
+            <div class="stat-row-head"><span>Badges</span></div>
+            <div class="pet-badges" id="pet-badges"></div>
+            <div class="stat-row-head"><span>Mood history</span></div>
+            <div class="pet-history" id="pet-mood-history"></div>
+            <div class="stat-row-head"><span>Pet settings</span></div>
+            <div class="setting-row"><span>Name</span><input id="pet-name-input" maxlength="24" placeholder="Garuda" aria-label="Pet name" /></div>
+            <div class="setting-row"><span>Show pet in the status bar</span><input type="checkbox" id="pet-enabled-chk" checked aria-label="Show pet" /></div>
+            <div class="setting-row"><span>Chirps (pet sound effects)</span><input type="checkbox" id="pet-sfx-chk" aria-label="Pet sound effects" /></div>
+        </div>
+        <div class="modal-footer">
+            <div class="share-actions">
+                <button class="btn-mini" data-action="pet-open-today">🕐 Mission Control: today</button>
+                <button class="btn-primary" data-action="pet-save">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Mission Control: today (5.6) -->
+<div id="today-modal" class="modal-overlay hidden">
+    <div class="modal-backdrop" data-action="today-close"></div>
+    <div class="modal-sheet sheet-wide" role="dialog" aria-label="Mission Control today">
+        <div class="sheet-handle"></div>
+        <div class="modal-header">
+            <h3><svg class="ic"><use href="#i-activity"></use></svg> Mission Control — <span id="today-date">today</span></h3>
+            <div class="drawer-header-actions">
+                <button class="icon-btn" data-action="today-refresh" title="Refresh now">⟳</button>
+                <button class="icon-btn" data-action="today-close" title="Close"><svg class="ic"><use href="#i-x"></use></svg></button>
+            </div>
+        </div>
+        <div class="modal-body">
+            <div class="today-strip-wrap"><div id="today-strip" class="today-strip"></div></div>
+            <div class="today-legend">
+                <span class="td-chip td-cmd">command</span><span class="td-chip td-task">task</span><span class="td-chip td-trigger">trigger</span><span class="td-chip td-sandbox">sandbox</span><span class="td-chip td-ai">AI</span><span class="td-chip td-file">file</span><span class="td-chip td-share">share</span><span class="td-chip td-rec">rec</span><span class="td-chip td-conn">conn</span><span class="td-chip td-social">social</span>
+            </div>
+            <div id="today-detail" class="today-detail hidden"></div>
+            <div class="stat-row-head"><span>Event log (newest first)</span></div>
+            <div id="today-list" class="today-list"></div>
+        </div>
+    </div>
+</div>
+
 <!-- File Editor (5.2) -->
 <div id="editor-modal" class="modal-overlay hidden">
     <div class="modal-backdrop" data-action="editor-close"></div>
@@ -1522,11 +1592,11 @@
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
-<script src="app.js?v=5.5.1"></script>
+<script src="app.js?v=5.6.0"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.3/dist/docx-preview.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
-<script src="ui.js?v=5.5.1"></script>
+<script src="ui.js?v=5.6.0"></script>
 </body>
 </html>

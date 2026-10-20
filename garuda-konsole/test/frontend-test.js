@@ -15,7 +15,7 @@ const BASE = process.env.BASE || `http://localhost:${PORT}`;
 let serverProc = null;
 if (!process.env.BASE) {
     serverProc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-        env: Object.assign({}, process.env, { PORT: String(PORT), KONSOLE_LOGIN_LIMIT: '100000' }),
+        env: Object.assign({}, process.env, { PORT: String(PORT), KONSOLE_LOGIN_LIMIT: '100000', GK_TODAY_DIR: path.join(require('os').tmpdir(), 'gk-today-fetest-' + PORT) }),
         stdio: ['ignore', 'pipe', 'pipe']
     });
     serverProc.stdout.on('data', () => {});
@@ -1420,6 +1420,54 @@ function visible(win, id) {
     await ev(win, `document.querySelector('[data-action="sandbox-close"]').click()`);
     await ev(win, `api('/api/files/delete', { method: 'POST', body: { path: 'gk-fs-ui.txt' } }).catch(() => {})`);
     await ev(win, `api('/api/files/delete', { method: 'POST', body: { path: 'gk-fs-ui.txt.bak' } }).catch(() => {})`);
+
+    /* ── 5.6: Garuda Pet + Mission Control today ── */
+    console.log('── 5.6: Garuda Pet (115-mood engine) ──');
+    check('pet mood catalog has 100+ moods', ev(win, `PET_MOODS.length >= 100`), 'count: ' + ev(win, `PET_MOODS.length`));
+    check('pet mood ids are unique', ev(win, `(() => { const ids = PET_MOODS.map((m) => m.id); return new Set(ids).size === ids.length; })()`));
+    check('resolver: pegged CPU → meltdown', ev(win, `petResolveMood({ cpu: 97 }).id === 'cpu-melt'`));
+    check('resolver: RAM OOM crisis wins', ev(win, `petResolveMood({ memPct: 96 }).id === 'ram-oom'`));
+    check('resolver: full disk wins', ev(win, `petResolveMood({ diskPct: 98 }).id === 'disk-full'`));
+    check('resolver: cmd failure beats calm vitals', ev(win, `petResolveMood({ cpu: 50, memPct: 40, ev: { 'cmd-fail': { until: Date.now() + 5000, data: { status: 1 } } } }).id === 'cmd-fail'`));
+    check('resolver: segfault resolves specifically', ev(win, `petResolveMood({ ev: { 'cmd-fail': { until: Date.now() + 5000, data: { status: 139 } } } }).id === 'cmd-segfault'`));
+    check('resolver: waiting task outranks everything calm', ev(win, `petResolveMood({ waitingTasks: 1, cpu: 10 }).id === 'task-waiting'`));
+    check('resolver: lost socket → panic', ev(win, `petResolveMood({ wsOk: false, wsDownMs: 5000 }).id === 'ws-lost'`));
+    check('pet rendered into the status bar', ev(win, `!!document.querySelector('#pet-root svg')`));
+    check('petEvent drives the live mood (data-mood)', ev(win, `(() => { PET_BADGES.forEach((b) => { petState.store.badges[b.id] = 1; }); const c = petState.ctx; c.ev = {}; c.fails60 = []; c.recentCmds = []; c.waitingTasks = 0; c.runningTasks = 0; c.wsOk = true; c.wsDownMs = 0; c.cpu = 10; c.memPct = 20; c.diskPct = 20; c.load1 = 0; petEvent('cmd-fail', { status: 2 }); return document.getElementById('pet-root').dataset.mood === 'cmd-fail'; })()`));
+    await ev(win, `openPetModal()`);
+    check('pet panel: mood + badges + vitals render', ev(win, `!document.getElementById('pet-modal').classList.contains('hidden') && document.querySelectorAll('#pet-badges .pet-badge').length >= 10 && document.getElementById('pet-panel-mood').textContent.length > 0`));
+    await ev(win, `document.querySelector('#pet-modal [data-action="pet-close"]').click()`);
+
+    console.log('── 5.6: Mission Control today scrubber ──');
+    await ev(win, `(function(){
+        const prev = window.fetch;
+        window.__restoreTodayFetch = function(){ window.fetch = prev; };
+        const day = new Date(); const p = (n) => String(n).padStart(2, '0');
+        const ds = day.getFullYear() + '-' + p(day.getMonth() + 1) + '-' + p(day.getDate());
+        const t0 = new Date(ds + 'T00:00:00').getTime();
+        window.__todayEvents = [
+            { ts: t0 + 3600000, cat: 'cmd', kind: 'ok', title: 'ls -la', meta: { exit: 0 } },
+            { ts: t0 + 7200000, cat: 'task', kind: 'exit', title: 'build', meta: { taskId: 'tk_1', exitCode: 1 } },
+            { ts: t0 + 10800000, cat: 'sandbox', kind: 'promote', title: '3 change(s) promoted', meta: {} }
+        ];
+        window.fetch = function(url, opts){
+            const u = String(url);
+            if (u.includes('/api/today/event') && opts && opts.method === 'POST') { window.__todayPosted = JSON.parse(opts.body); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ success: true }) }); }
+            if (u.includes('/api/today')) return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ date: ds, now: Date.now(), events: window.__todayEvents }) });
+            return prev(url, opts);
+        };
+    })()`);
+    await ev(win, `openTodayModal()`);
+    await tick(300);
+    check('today modal renders one dot per event', ev(win, `!document.getElementById('today-modal').classList.contains('hidden') && document.querySelectorAll('#today-strip .td-dot').length === 3`));
+    check('dot position maps hour → x%', ev(win, `Math.abs(parseFloat(document.querySelector('#today-strip .td-dot').style.left) - 100 / 24) < 0.5`));
+    check('event list shows newest first', ev(win, `document.querySelector('#today-list .td-row .td-row-title').textContent.includes('promoted')`));
+    await ev(win, `todaySelect(1)`);
+    check('task event detail offers the log action', ev(win, `!document.getElementById('today-detail').classList.contains('hidden') && !!document.querySelector('#today-detail [data-action="td-tasklog"]')`));
+    await ev(win, `todayJournal('cmd', 'ok', 'echo stub-test', { exit: 0 })`);
+    await tick(80);
+    check('client journal POST wired (cat/kind/title)', ev(win, `window.__todayPosted && window.__todayPosted.cat === 'cmd' && window.__todayPosted.title === 'echo stub-test'`));
+    await ev(win, `window.__restoreTodayFetch(); closeTodayModal();`);
 
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');

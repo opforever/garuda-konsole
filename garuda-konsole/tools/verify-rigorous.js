@@ -32,7 +32,7 @@ const ck = (n, c, x) => { results.push({ n, ok: !!c }); console.log((c ? '  ✔ 
 
     /* ── S1 boot, login, SW hygiene ── */
     console.log('── S1 boot / login / service worker ──');
-    await page.addInitScript(() => { try { localStorage.setItem('gk_tour_done', 'true'); localStorage.setItem('gk_news_seen', JSON.stringify('5.5.1')); } catch (e) {} });
+    await page.addInitScript(() => { try { localStorage.setItem('gk_tour_done', 'true'); localStorage.setItem('gk_news_seen', JSON.stringify('5.6.0')); } catch (e) {} });
     await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1500);
     for (let a = 0; a < 6; a++) {

@@ -10,7 +10,7 @@ const WebSocket = require('ws');
 let serverProc = null;
 if (!process.env.BASE) {
     serverProc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-        env: Object.assign({}, process.env, { PORT: String(PORT), KONSOLE_TASK_REMIND_MS: process.env.KONSOLE_TASK_REMIND_MS || '3000', GK_HEALTH_CPU: process.env.GK_HEALTH_CPU || '30', GK_STATS_TICK_MS: process.env.GK_STATS_TICK_MS || '2000' }),
+        env: Object.assign({}, process.env, { PORT: String(PORT), KONSOLE_TASK_REMIND_MS: process.env.KONSOLE_TASK_REMIND_MS || '3000', GK_HEALTH_CPU: process.env.GK_HEALTH_CPU || '30', GK_STATS_TICK_MS: process.env.GK_STATS_TICK_MS || '2000', GK_TODAY_DIR: path.join(require('os').tmpdir(), 'gk-today-apitest-' + PORT) }),
         stdio: ['ignore', 'pipe', 'pipe']
     });
     serverProc.stdout.on('data', () => {});
@@ -974,6 +974,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const z55_sb4 = await j(`${B}/api/sandbox/sbx_nope/promote`, { method: 'POST', headers: z52_JH, body: JSON.stringify({}) });
     const z55_sb5 = await j(`${B}/api/sandbox/sbx_nope/discard`, { method: 'POST', headers: z52_JH, body: JSON.stringify({}) });
     check('unknown sandbox id 404s everywhere', z55_sb3.status === 404 && z55_sb4.status === 404 && z55_sb5.status === 404);
+
+    console.log('── 5.6: Mission Control day journal ──');
+    const z56_t0 = await j(`${B}/api/today`);
+    check('today journal requires auth', z56_t0.status === 401);
+    const z56_t1 = await j(`${B}/api/today`, { headers: H });
+    check('today returns date/now/events', z56_t1.status === 200 && /^\d{4}-\d{2}-\d{2}$/.test(z56_t1.body.date) && typeof z56_t1.body.now === 'number' && Array.isArray(z56_t1.body.events));
+    const z56_t2 = await j(`${B}/api/today/event`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ cat: 'cmd', kind: 'ok', title: 'echo journal-test', meta: { exit: 0, durMs: 4 } }) });
+    check('client event accepted', z56_t2.status === 200 && z56_t2.body.success === true);
+    const z56_t3 = await j(`${B}/api/today`, { headers: H });
+    const z56_evs = z56_t3.body.events || [];
+    check('client event appears in the journal', z56_evs.some((e) => e.cat === 'cmd' && e.title === 'echo journal-test' && e.meta && e.meta.exit === 0));
+    check('server-side task lifecycle journaled', z56_evs.some((e) => e.cat === 'task' && e.kind === 'start'));
+    check('login was journaled', z56_evs.some((e) => e.cat === 'auth' && e.kind === 'login'));
+    const z56_t4 = await j(`${B}/api/today/event`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ cat: 'nope', kind: 'x' }) });
+    check('invalid category rejected 400', z56_t4.status === 400);
+    const z56_t5 = await j(`${B}/api/today?date=1999-99-99`, { headers: H });
+    check('invalid date rejected 400', z56_t5.status === 400);
+    const z56_t6 = await j(`${B}/api/today/dates`, { headers: H });
+    check('dates endpoint lists the journal day', z56_t6.status === 200 && Array.isArray(z56_t6.body.dates) && z56_t6.body.dates.length >= 1);
 
     console.log(`\n═══ RESULT: ${passed} passed, ${failed} failed ═══`);
     if (serverProc) serverProc.kill();
