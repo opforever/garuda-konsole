@@ -281,6 +281,7 @@ function playBootSequence() {
     };
     bootSkipFn = finish;
     overlay.onclick = finish;
+    overlay.onpointerdown = finish; // any button (incl. right-click) skips — never swallow input
 
     let delay = 180;
     BOOT_LINES.forEach((line, i) => {
@@ -684,6 +685,7 @@ function renderFilesList() {
         if (!entry.dir) {
             actions += `<button class="icon-btn" data-action="file-download" data-path="${escHtml(full)}" title="Download"><svg class="ic"><use href="#i-download"></use></svg></button>`;
             actions += `<button class="icon-btn" data-action="files-edit" data-path="${escHtml(full)}" title="Edit in browser"><svg class="ic"><use href="#i-edit"></use></svg></button>`;
+            actions += `<button class="icon-btn" data-action="fileshare-open" data-path="${escHtml(full)}" title="Share via expiring public link"><svg class="ic"><use href="#i-ext-link"></use></svg></button>`;
         } else {
             actions += `<button class="icon-btn" data-action="file-cd" data-path="${escHtml(full)}" title="cd here in terminal"><svg class="ic"><use href="#i-corner"></use></svg></button>`;
         }
@@ -1210,6 +1212,7 @@ function buildPaletteItems(query) {
     pushScored({ sec: 'Voice', icon: '#i-download', title: 'Save last AI reply as audio (WAV)', sub: 'download spoken audio', kw: 'wav mp3 export download voice reply', run: () => { closePalette(); const it = aiState.ui.slice().reverse().find((i) => i.text); if (it) downloadTextAsMp3(it.text, it.id); else showToast({ type: 'info', title: 'No AI reply to export yet' }); } }, 'mp3 export reply voice');
     for (const r of getRecentCommands().slice(0, 40)) pushScored({ sec: 'Recent', icon: '#i-clock', title: r, sub: 'run again', kw: r, run: () => { runCommandInActiveTab(r); closePalette(); } }, r);
     /* 5.2: saved workspace layouts */
+    pushScored({ sec: 'Actions', icon: '#i-split', title: 'Run in branch sandbox…', sub: 'disposable write layer over HOME', kw: 'sandbox bubblewrap branch overlay test safe', run: () => { closePalette(); openSandboxModal(); } }, 'sandbox branch bubblewrap run safe');
     pushScored({ sec: 'Actions', icon: '#i-monitor', title: 'Remote Desktop: open panel', sub: 'stream this machine\'s screen', kw: 'remote desktop vnc screen stream control', run: () => { closePalette(); toggleRd(); } }, 'remote desktop open panel');
     pushScored({ sec: 'Actions', icon: '#i-monitor', title: rdState.connected ? 'Remote Desktop: stop streaming' : 'Remote Desktop: connect', sub: 'screen + input + audio', kw: 'remote desktop connect stop stream', run: () => { closePalette(); const d = $('rd-drawer'); if (d && d.classList.contains('hidden')) toggleRd(); rdState.connected ? rdDisconnect() : rdConnect(); } }, 'remote desktop connect stop');
     pushScored({ sec: 'Layouts', icon: '#i-save', title: 'Save current layout…', sub: 'tabs + splits + colors', kw: 'layout save workspace snapshot arrange', run: () => { closePalette(); saveCurrentLayoutPrompt(); } }, 'save layout workspace snapshot');
@@ -2396,6 +2399,19 @@ const ACTIONS = {
     'proc-nice-up': (node) => procRenice(node.dataset.pid, (parseInt(node.dataset.nice, 10) || 0) + 1),
     'proc-nice-down': (node) => procRenice(node.dataset.pid, (parseInt(node.dataset.nice, 10) || 0) - 1),
     'layout-save': () => saveCurrentLayoutPrompt(),
+    'ai-fail-explain': (node) => { const it = aiState.ui.find((x) => x.id === node.dataset.id); if (it) aiExplainFailure(it.cmd, it.output, it.status); },
+    'fileshare-open': (node) => openFileShare(node.dataset.path),
+    'fileshare-close': () => { const m = $('fileshare-modal'); if (m) m.classList.add('hidden'); },
+    'fileshare-create': () => createFileShare(),
+    'fileshare-copy': () => { const i = $('fileshare-url'); if (i && i.value) { navigator.clipboard && navigator.clipboard.writeText(i.value); showToast({ type: 'success', title: 'Link copied', text: i.value, duration: 4000 }); } },
+    'fileshare-revoke': (node) => revokeFileShare(node.dataset.token),
+    'fileshare-copy-row': (node) => { const url = location.origin + node.dataset.url; if (navigator.clipboard) navigator.clipboard.writeText(url); showToast({ type: 'success', title: 'Link copied', text: url, duration: 4000 }); },
+    'sandbox-open': () => openSandboxModal(),
+    'sandbox-close': () => { const m = $('sandbox-modal'); if (m) m.classList.add('hidden'); sandboxPollStop(); },
+    'sandbox-run': () => runSandbox(),
+    'sandbox-promote': () => promoteSandbox(),
+    'sandbox-discard': () => discardSandbox(),
+    'sandbox-refresh': () => refreshSandboxChanges(),
     'ai-cmd-edit': (node) => aiCmdEdit(node.dataset.id),
     'ai-suggestion-run': (node) => aiRunSuggestion(node.dataset.id),
     'ai-save-config': () => saveAiConfig(),
@@ -3917,6 +3933,11 @@ function renderAiMessages() {
             d.innerHTML = `<div class="ai-bubble">${escHtml(item.text)}</div>`;
         } else if (item.kind === 'cmd') {
             d = renderAiCmdCard(item);
+        } else if (item.kind === 'fail') {
+            d = el('div', 'ai-msg sysmsg error');
+            d.innerHTML = `<div class="ai-bubble">✖ <code class="fail-cmd"></code> exited ${item.status}
+                <div class="ai-cmd-actions"><button class="btn-mini run-btn" data-action="ai-fail-explain" data-id="${item.id}">🤖 Why did this fail?</button></div></div>`;
+            d.querySelector('.fail-cmd').textContent = String(item.cmd).slice(0, 120);
         }
         if (d) {
             if (seen) d.classList.add('no-anim');
@@ -5451,4 +5472,173 @@ function rdDisconnect() {
     rdTeardown();
     rdSetChip('idle');
     rdRefreshStatus();
+}
+
+
+/* ─────────────── 5.5: fail chip over the terminal ─────────────── */
+function showFailChip(tab, cmd, status) {
+    const host = tab && tab.termEl;
+    if (!host) return;
+    let chip = host.querySelector('.fail-chip');
+    if (!chip) {
+        chip = document.createElement('button');
+        chip.className = 'fail-chip';
+        host.appendChild(chip);
+    }
+    chip.textContent = `✖ exit ${status} — why?`;
+    chip.title = String(cmd).slice(0, 140);
+    chip.classList.remove('hidden');
+    chip.onclick = (e) => {
+        e.stopPropagation();
+        chip.classList.add('hidden');
+        if (tab.lastFail) aiExplainFailure(tab.lastFail.cmd, tab.lastFail.output, tab.lastFail.status);
+    };
+    clearTimeout(chip._t);
+    chip._t = setTimeout(() => chip.classList.add('hidden'), 25000);
+}
+
+/* ─────────────── 5.5: single-file share links ─────────────── */
+let filesharePath = null;
+let fileshareResult = null;
+async function openFileShare(p) {
+    const modal = $('fileshare-modal');
+    if (!modal || !p) return;
+    filesharePath = p;
+    fileshareResult = null;
+    $('fileshare-path').textContent = p;
+    const res = $('fileshare-result');
+    if (res) res.classList.add('hidden');
+    const s = getSettings();
+    const exp = $('fileshare-exp');
+    if (exp) exp.value = String([1, 6, 24, 168].includes(s.fileShareExpiry) ? s.fileShareExpiry : 24);
+    const mv = $('fileshare-maxviews');
+    if (mv) mv.value = '0';
+    const mode = $('fileshare-mode');
+    if (mode) mode.value = 'view';
+    modal.classList.remove('hidden');
+    renderFileShareList();
+}
+async function createFileShare() {
+    if (!filesharePath) return;
+    const mode = ($('fileshare-mode') || {}).value || 'view';
+    let hours = parseInt(($('fileshare-exp') || {}).value, 10) || 24;
+    if (hours === -1) hours = clamp(parseInt(($('fileshare-exp-custom') || {}).value, 10) || 24, 1, 336);
+    const maxViews = clamp(parseInt(($('fileshare-maxviews') || {}).value, 10) || 0, 0, 10000);
+    saveSettings({ fileShareExpiry: hours });
+    try {
+        const r = await api('/api/fileshare/create', { method: 'POST', body: { path: filesharePath, mode, expiresH: hours, maxViews } });
+        fileshareResult = r;
+        const url = location.origin + r.url;
+        const box = $('fileshare-result');
+        const input = $('fileshare-url');
+        if (box && input) { box.classList.remove('hidden'); input.value = url; }
+        try { await navigator.clipboard.writeText(url); } catch (e) {}
+        showToast({ type: 'success', title: 'Share link copied', text: `${mode} · ${hours} h${maxViews ? ' · max ' + maxViews + ' views' : ''}`, duration: 4500 });
+        renderFileShareList();
+    } catch (e) { showToast({ type: 'error', title: 'Share failed', text: String(e.message || e) }); }
+}
+async function renderFileShareList() {
+    const host = $('fileshare-list');
+    if (!host) return;
+    try {
+        const d = await api('/api/fileshare/list');
+        if (!d.shares.length) { host.innerHTML = '<div class="setting-subtitle">No active share links.</div>'; return; }
+        host.innerHTML = d.shares.map((f) => `
+            <div class="fshare-row" title="${escHtml(f.path)}">
+                <span class="fshare-name">${escHtml(f.path.split('/').pop())}</span>
+                <span class="fshare-meta">${f.mode} · ${Math.max(0, Math.round((f.expiresAt - Date.now()) / 3600000))}h left · ${f.views}${f.maxViews ? '/' + f.maxViews : ''} views</span>
+                <span class="fshare-btns">
+                    <button class="btn-mini" data-action="fileshare-copy-row" data-token="${f.token}" data-url="${f.mode === 'view' ? '/fs.html?r=' : '/api/fileshare/'}${f.token}">copy</button>
+                    <button class="btn-mini danger-mini" data-action="fileshare-revoke" data-token="${f.token}">revoke</button>
+                </span>
+            </div>`).join('');
+    } catch (e) { host.innerHTML = ''; }
+}
+async function revokeFileShare(token) {
+    try {
+        await api('/api/fileshare/revoke', { method: 'POST', body: { token } });
+        showToast({ type: 'success', title: 'Link revoked', duration: 1500, silent: true });
+        renderFileShareList();
+    } catch (e) { showToast({ type: 'error', title: 'Revoke failed', text: String(e.message || e) }); }
+}
+
+/* ─────────────── 5.5: branch sandbox UI ─────────────── */
+let sandboxState = { id: null, taskId: null, timer: null, done: false };
+function sandboxPollStop() { if (sandboxState.timer) { clearInterval(sandboxState.timer); sandboxState.timer = null; } }
+async function openSandboxModal() {
+    const modal = $('sandbox-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    const st = await api('/api/sandbox/status').catch(() => null);
+    const note = $('sandbox-note');
+    if (note) {
+        if (!st || !st.available) { note.textContent = 'bubblewrap is NOT installed on the host — install with: sudo pacman -S bubblewrap'; note.classList.remove('hidden'); }
+        else if (!st.overlay) { note.textContent = 'bwrap present but without --overlay: sandbox home will be an empty tmpfs (writes isolated, reads invisible).'; note.classList.remove('hidden'); }
+        else { note.textContent = 'Writes land in a throwaway layer over your HOME; reads see the real system. Promote or discard afterwards.'; note.classList.remove('hidden'); }
+    }
+}
+async function runSandbox() {
+    const cmd = ($('sandbox-cmd') || {}).value || '';
+    if (!cmd.trim()) return;
+    sandboxPollStop();
+    sandboxState = { id: null, taskId: null, timer: null, done: false };
+    const log = $('sandbox-log');
+    const acts = $('sandbox-actions');
+    if (log) log.textContent = 'starting…';
+    if (acts) acts.classList.add('hidden');
+    try {
+        const r = await api('/api/sandbox/run', { method: 'POST', body: { cmd } });
+        sandboxState.id = r.id;
+        sandboxState.taskId = r.taskId;
+        let cursor = 0;
+        sandboxState.timer = setInterval(async () => {
+            try {
+                const d = await api(`/api/tasks/${sandboxState.taskId}/log?from=${cursor}`);
+                if (d && typeof d.log === 'string') { cursor = d.next || cursor + d.log.length; if (log) log.textContent += d.log; if (log) log.scrollTop = log.scrollHeight; }
+                const t = await api('/api/tasks');
+                const task = (t.tasks || []).find((x) => x.id === sandboxState.taskId);
+                if (!task || !task.alive) {
+                    sandboxPollStop();
+                    sandboxState.done = true;
+                    if (log) log.textContent += '\n— sandbox run finished —';
+                    if (acts) acts.classList.remove('hidden');
+                    refreshSandboxChanges();
+                }
+            } catch (e) {}
+        }, 900);
+    } catch (e) {
+        if (log) log.textContent = 'sandbox error: ' + (e.message || e);
+    }
+}
+async function refreshSandboxChanges() {
+    const host = $('sandbox-changes');
+    if (!host || !sandboxState.id) return;
+    try {
+        const d = await api(`/api/sandbox/${sandboxState.id}/changes`);
+        host.innerHTML = d.files.length
+            ? d.files.map((f) => `<div class="fshare-row"><span class="fshare-name">${escHtml(f.rel)}</span><span class="fshare-meta">${fmtBytes(f.size)}</span></div>`).join('')
+            : '<div class="setting-subtitle">No files written in the sandbox layer.</div>';
+    } catch (e) { host.innerHTML = ''; }
+}
+async function promoteSandbox() {
+    if (!sandboxState.id) return;
+    const ok = await showConfirm({ title: 'Promote sandbox writes?', message: 'Copies every file the sandbox wrote over your REAL home (existing files get a .bak). Continue?', okLabel: 'Promote' });
+    if (!ok) return;
+    try {
+        const r = await api(`/api/sandbox/${sandboxState.id}/promote`, { method: 'POST', body: {} });
+        showToast({ type: 'success', title: `Promoted ${r.done.length} file(s)`, text: r.skipped.length ? r.skipped.length + ' skipped (protected)' : '', duration: 4000 });
+        await discardSandbox(true);
+    } catch (e) { showToast({ type: 'error', title: 'Promote failed', text: String(e.message || e) }); }
+}
+async function discardSandbox(silent) {
+    if (!sandboxState.id) return;
+    try {
+        await api(`/api/sandbox/${sandboxState.id}/discard`, { method: 'POST', body: {} });
+        if (!silent) showToast({ type: 'success', title: 'Sandbox layer discarded', duration: 1800, silent: true });
+    } catch (e) {}
+    const host = $('sandbox-changes');
+    if (host) host.innerHTML = '';
+    const acts = $('sandbox-actions');
+    if (acts) acts.classList.add('hidden');
+    sandboxState.id = null;
 }

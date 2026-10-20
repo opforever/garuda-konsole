@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.4.1';
+const APP_VERSION = '5.5.0';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -36,6 +36,7 @@ const DEFAULT_SETTINGS = {
     completionNotifications: true,
     healthPush: false,
     autoSaveRecordings: true,
+    fileShareExpiry: 24,
     bootAnim: true,
     reducedMotion: false,
     scrollSpeed: 4,
@@ -1124,6 +1125,12 @@ function createNewTab(existingId, existingTitle, profile) {
     term.loadAddon(searchAddon);
     term.loadAddon(webLinksAddon);
     term.open(termEl);
+    /* 5.5: shell semantic prompts (fish emits OSC 133 with $status) → fail chips */
+    try {
+        if (term.parser && term.parser.registerOscHandler) {
+            term.parser.registerOscHandler(133, (data) => handleOsc133(tabs[tabId], data));
+        }
+    } catch (e) {}
 
     const tab = {
         id: tabId,
@@ -1353,6 +1360,47 @@ function downloadBySelection(tabId, selection) {
     if (!token || !selection) return;
     const url = `/download?tabId=${encodeURIComponent(tabId)}&filename=${encodeURIComponent(selection)}&auth=${encodeURIComponent(token)}`;
     window.open(url, '_blank');
+}
+
+/* ─────────────── 5.5: failure awareness (OSC 133 + fail chips) ─────────────── */
+function handleOsc133(tab, data) {
+    if (!tab) return true;
+    const d = String(data == null ? '' : data);
+    if (d.charAt(0) === 'C') {
+        try {
+            const b = tab.term.buffer.active;
+            tab.oscMark = b.baseY + b.cursorY;
+        } catch (e) { tab.oscMark = null; }
+        const m = d.match(/cmdline_url=([^;\x07]+)/);
+        if (m) { try { tab.oscCmd = decodeURIComponent(m[1]); } catch (e) { tab.oscCmd = m[1]; } }
+    } else if (d.charAt(0) === 'D') {
+        const status = parseInt(d.slice(2), 10) || 0;
+        if (status !== 0) failEvent(tab, tab.oscCmd || '(command)', oscSlice(tab), status);
+        tab.oscMark = null;
+    }
+    return true;
+}
+function oscSlice(tab) {
+    try {
+        const b = tab.term.buffer.active;
+        const from = tab.oscMark != null ? Math.max(0, tab.oscMark) : Math.max(0, b.length - 40);
+        const lines = [];
+        for (let y = from; y < b.length; y++) {
+            const l = b.getLine(y);
+            if (l) lines.push(l.translateToString(true));
+        }
+        return lines.join('\n').slice(-6000);
+    } catch (e) { return ''; }
+}
+function failEvent(tab, cmd, output, status) {
+    if (!tab) return;
+    tab.lastFail = { cmd, output, status, at: Date.now() };
+    if (typeof showFailChip === 'function') showFailChip(tab, cmd, status);
+    aiPush({ kind: 'fail', cmd: String(cmd).slice(0, 200), output: String(output || '').slice(-6000), status });
+}
+function aiExplainFailure(cmd, output, status) {
+    const ctx = `Command: ${cmd}\nExit status: ${status}\nOutput:\n${String(output || '').slice(-4000)}`;
+    if (typeof aiExplainSelection === 'function') aiExplainSelection(ctx, 'fix');
 }
 
 function persistTabList() {

@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.4.1';
+const VERSION = '5.5.0';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -1197,6 +1197,167 @@ function handleRdSocket(ws) {
     });
     rdStart(ws);
 }
+
+/* ─────────────── 5.5: single-file share links (public, expiring, revocable) ─────────────── */
+
+const fileShares = new Map(); // token → { token, path, mode, createdAt, expiresAt, maxViews, views }
+const FSHARE_MAX_H = 336; // 14 days
+function purgeFileShares() {
+    const now = Date.now();
+    for (const [t, f] of fileShares.entries()) if (now > f.expiresAt) fileShares.delete(t);
+}
+setInterval(purgeFileShares, 10 * 60 * 1000);
+function fshareMime(p) {
+    const ext = String(p).split('.').pop().toLowerCase();
+    const M = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', m4a: 'audio/mp4', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/x-m4v', pdf: 'application/pdf', txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8', json: 'application/json; charset=utf-8', html: 'text/html; charset=utf-8' };
+    return M[ext] || 'application/octet-stream';
+}
+
+app.post('/api/fileshare/create', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const target = typeof body.path === 'string' ? path.resolve(body.path) : null;
+    if (!target || !fs.existsSync(target) || !fs.statSync(target).isFile()) return res.status(404).json({ error: 'File not found' });
+    if (PROTECTED_PATHS.has(target)) return res.status(403).json({ error: 'Refusing to share a protected system path' });
+    const st = fs.statSync(target);
+    if (st.size > 200 * 1024 * 1024) return res.status(413).json({ error: 'Refusing to share files over 200 MB' });
+    const mode = body.mode === 'download' ? 'download' : 'view';
+    const hours = clampInt(body.expiresH, 1, FSHARE_MAX_H, 24);
+    const maxViews = clampInt(body.maxViews, 0, 10000, 0); // 0 = unlimited
+    purgeFileShares();
+    const token = 'fshare_' + crypto.randomBytes(10).toString('hex');
+    fileShares.set(token, { token, path: target, mode, createdAt: Date.now(), expiresAt: Date.now() + hours * 3600 * 1000, maxViews, views: 0 });
+    res.json({ success: true, token, mode, hours, maxViews, url: '/fs.html?r=' + token, expiresAt: fileShares.get(token).expiresAt });
+});
+app.get('/api/fileshare/list', requireAuth, (req, res) => {
+    purgeFileShares();
+    res.json({ shares: [...fileShares.values()].map((f) => ({ token: f.token, path: f.path, mode: f.mode, createdAt: f.createdAt, expiresAt: f.expiresAt, views: f.views, maxViews: f.maxViews })).sort((a, b) => b.createdAt - a.createdAt) });
+});
+app.post('/api/fileshare/revoke', requireAuth, (req, res) => {
+    const t = req.body && req.body.token;
+    const ok = fileShares.delete(String(t || ''));
+    res.json({ success: ok });
+});
+function fshareGuard(req, res) {
+    const f = fileShares.get(req.params.token);
+    if (!f || Date.now() > f.expiresAt) { res.status(404).json({ error: 'Share not found or expired' }); return null; }
+    if (f.maxViews && f.views >= f.maxViews) { res.status(410).json({ error: 'View limit reached' }); return null; }
+    return f;
+}
+app.get('/api/fileshare/:token', (req, res) => {
+    const f = fshareGuard(req, res);
+    if (!f) return;
+    let size = 0, mtime = 0;
+    try { const st = fs.statSync(f.path); size = st.size; mtime = st.mtimeMs; } catch (e) { return res.status(404).json({ error: 'File gone' }); }
+    res.json({ name: path.basename(f.path), size, mtime, mode: f.mode, mime: fshareMime(f.path), expiresAt: f.expiresAt, views: f.views, maxViews: f.maxViews });
+});
+app.get('/api/fileshare/:token/content', (req, res) => {
+    const f = fshareGuard(req, res);
+    if (!f) return;
+    f.views++;
+    res.setHeader('Content-Type', fshareMime(f.path));
+    res.setHeader('Cache-Control', 'no-store');
+    const stream = fs.createReadStream(f.path);
+    stream.on('error', () => { try { res.end(); } catch (e) {} });
+    stream.pipe(res);
+});
+app.get('/api/fileshare/:token/download', (req, res) => {
+    const f = fshareGuard(req, res);
+    if (!f) return;
+    f.views++;
+    res.download(f.path, path.basename(f.path));
+});
+
+/* ─────────────── 5.5: branch sandbox (bubblewrap copy-on-write runs) ─────────────── */
+
+const sandboxRuns = new Map(); // id → { id, taskId, layer, cmd, createdAt, files }
+function bwrapBin() { return rdHasBin('bwrap') ? 'bwrap' : null; }
+app.get('/api/sandbox/status', requireAuth, (req, res) => {
+    const b = bwrapBin();
+    let overlay = false;
+    if (b) {
+        try { overlay = /--overlay/.test(require('child_process').spawnSync(b, ['--help']).stdout.toString()); } catch (e) {}
+    }
+    res.json({ available: !!b, overlay, hint: b ? null : 'install bubblewrap: sudo pacman -S bubblewrap' });
+});
+app.post('/api/sandbox/run', requireAuth, (req, res) => {
+    const cmd = req.body && typeof req.body.cmd === 'string' ? req.body.cmd.trim() : '';
+    if (!cmd || cmd.length > 4000) return res.status(400).json({ error: 'cmd required (max 4000)' });
+    const b = bwrapBin();
+    if (!b) return res.status(503).json({ error: 'bubblewrap (bwrap) is not installed on the host — sudo pacman -S bubblewrap' });
+    const id = 'sbx_' + crypto.randomBytes(6).toString('hex');
+    const layer = path.join(os.tmpdir(), 'gk-sbx-' + id);
+    fs.mkdirSync(path.join(layer, 'up'), { recursive: true });
+    fs.mkdirSync(path.join(layer, 'wk'), { recursive: true });
+    const home = process.env.HOME || os.homedir();
+    let overlay = true;
+    try { overlay = /--overlay/.test(require('child_process').spawnSync(b, ['--help']).stdout.toString()); } catch (e) { overlay = false; }
+    const wrap = overlay
+        ? `${b} --die-with-parent --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp --overlay ${layer}/up ${layer}/wk ${home} sh -c ${JSON.stringify(cmd)}`
+        : `${b} --die-with-parent --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp --tmpfs ${home} sh -c ${JSON.stringify(cmd)}`;
+    const result = runTask({ name: 'sandbox: ' + cmd.split('\n')[0].slice(0, 50), cmd: wrap, cwd: null, notify: req.body.notify !== false });
+    if (result.error) return res.status(400).json({ error: result.error });
+    sandboxRuns.set(id, { id, taskId: result.id, layer, cmd, createdAt: Date.now(), files: null, overlay });
+    while (sandboxRuns.size > 10) sandboxRuns.delete(sandboxRuns.keys().next().value);
+    res.json({ success: true, id, taskId: result.id, overlay });
+});
+function sandboxChanges(rec) {
+    if (rec.files) return rec.files;
+    const up = path.join(rec.layer, 'up');
+    const out = [];
+    const walk = (dir, rel) => {
+        let names = [];
+        try { names = fs.readdirSync(dir); } catch (e) { return; }
+        for (const n of names) {
+            const abs = path.join(dir, n);
+            let st = null;
+            try { st = fs.lstatSync(abs); } catch (e) { continue; }
+            const r = rel ? rel + '/' + n : n;
+            if (st.isDirectory()) walk(abs, r);
+            else if (st.isFile()) out.push({ rel: r, size: st.size });
+            if (out.length >= 500) return;
+        }
+    };
+    walk(up, '');
+    rec.files = out;
+    return out;
+}
+app.get('/api/sandbox', requireAuth, (req, res) => {
+    res.json({ runs: [...sandboxRuns.values()].map((r) => ({ id: r.id, taskId: r.taskId, cmd: r.cmd, createdAt: r.createdAt, overlay: r.overlay })) });
+});
+app.get('/api/sandbox/:id/changes', requireAuth, (req, res) => {
+    const rec = sandboxRuns.get(req.params.id);
+    if (!rec) return res.status(404).json({ error: 'not found' });
+    res.json({ files: sandboxChanges(rec), layer: rec.layer });
+});
+app.post('/api/sandbox/:id/promote', requireAuth, (req, res) => {
+    const rec = sandboxRuns.get(req.params.id);
+    if (!rec) return res.status(404).json({ error: 'not found' });
+    const home = process.env.HOME || os.homedir();
+    const wanted = Array.isArray(req.body && req.body.paths) ? req.body.paths : null;
+    const files = sandboxChanges(rec);
+    const done = [], skipped = [];
+    for (const f of files) {
+        if (wanted && !wanted.includes(f.rel)) continue;
+        const src = path.join(rec.layer, 'up', f.rel);
+        const dst = path.resolve(path.join(home, f.rel));
+        if (!dst.startsWith(home + path.sep)) { skipped.push(f.rel); continue; }
+        if (PROTECTED_PATHS.has(dst)) { skipped.push(f.rel); continue; }
+        try {
+            fs.mkdirSync(path.dirname(dst), { recursive: true });
+            if (fs.existsSync(dst)) fs.copyFileSync(dst, dst + '.bak');
+            fs.copyFileSync(src, dst);
+            done.push(f.rel);
+        } catch (e) { skipped.push(f.rel); }
+    }
+    res.json({ success: true, done, skipped });
+});
+app.post('/api/sandbox/:id/discard', requireAuth, (req, res) => {
+    const rec = sandboxRuns.get(req.params.id);
+    if (!rec) return res.status(404).json({ error: 'not found' });
+    try { fs.rmSync(rec.layer, { recursive: true, force: true }); } catch (e) {}
+    sandboxRuns.delete(req.params.id);
+    res.json({ success: true });
+});
 
 /* ─────────────── 5.2.1: persistent recording library (~/Rec_jsonl) ─────────────── */
 

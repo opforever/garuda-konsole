@@ -927,6 +927,44 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     rdSrv.kill();
     try { ydoSrv.close(); fs.unlinkSync(ydoSockPath); } catch (e) {}
 
+
+    console.log('── 5.5: file share links ──');
+    await j(`${B}/api/files/write`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-share.txt', content: 'shared hello' }) });
+    const z55_f1 = await j(`${B}/api/fileshare/create`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-share.txt', mode: 'view', expiresH: 1, maxViews: 2 }) });
+    check('fileshare create returns token+url', z55_f1.status === 200 && z55_f1.body.token && z55_f1.body.url.startsWith('/fs.html?r='));
+    const z55_fmeta = await j(`${B}/api/fileshare/${z55_f1.body.token}`);
+    check('share meta public (no auth)', z55_fmeta.status === 200 && z55_fmeta.body.name === 'gk-share.txt' && z55_fmeta.body.mode === 'view');
+    const z55_fc1 = await fetch(`${B}/api/fileshare/${z55_f1.body.token}/content`);
+    const z55_fc1t = await z55_fc1.text();
+    const z55_fc2 = await fetch(`${B}/api/fileshare/${z55_f1.body.token}/content`);
+    await z55_fc2.text();
+    const z55_fc3 = await fetch(`${B}/api/fileshare/${z55_f1.body.token}/content`);
+    check('content streams + maxViews enforced (410)', z55_fc1.status === 200 && z55_fc1t === 'shared hello' && z55_fc2.status === 200 && z55_fc3.status === 410);
+    const z55_f2 = await j(`${B}/api/fileshare/create`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-share.txt', mode: 'download', expiresH: 336 }) });
+    const z55_fd = await fetch(`${B}/api/fileshare/${z55_f2.body.token}/download`);
+    check('download mode sets attachment', z55_fd.status === 200 && /attachment/.test(z55_fd.headers.get('content-disposition') || ''));
+    const z55_flist = await j(`${B}/api/fileshare/list`, { headers: H });
+    check('share list shows both', z55_flist.status === 200 && z55_flist.body.shares.length >= 2);
+    const z55_frev = await j(`${B}/api/fileshare/revoke`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ token: z55_f2.body.token }) });
+    const z55_fafter = await j(`${B}/api/fileshare/${z55_f2.body.token}`);
+    check('revoke kills the link', z55_frev.body.success === true && z55_fafter.status === 404);
+    const z55_fbad = await j(`${B}/api/fileshare/create`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: '/', mode: 'view' }) });
+    check('protected path cannot be shared', z55_fbad.status === 403 || z55_fbad.status === 404);
+    const z55_fhtml = await fetch(`${B}/fs.html`);
+    check('public viewer page served', z55_fhtml.status === 200);
+    await j(`${B}/api/files/delete`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ path: 'gk-share.txt' }) });
+
+    console.log('── 5.5: branch sandbox guards ──');
+    const z55_sb1 = await j(`${B}/api/sandbox/status`, { headers: H });
+    check('sandbox status reports availability', z55_sb1.status === 200 && typeof z55_sb1.body.available === 'boolean');
+    const z55_sb2 = await j(`${B}/api/sandbox/run`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ cmd: 'echo hi' }) });
+    if (z55_sb1.body.available) check('sandbox run accepts cmd', z55_sb2.status === 200 && z55_sb2.body.id);
+    else check('sandbox run 503 without bubblewrap', z55_sb2.status === 503);
+    const z55_sb3 = await j(`${B}/api/sandbox/sbx_nope/changes`, { headers: H });
+    const z55_sb4 = await j(`${B}/api/sandbox/sbx_nope/promote`, { method: 'POST', headers: z52_JH, body: JSON.stringify({}) });
+    const z55_sb5 = await j(`${B}/api/sandbox/sbx_nope/discard`, { method: 'POST', headers: z52_JH, body: JSON.stringify({}) });
+    check('unknown sandbox id 404s everywhere', z55_sb3.status === 404 && z55_sb4.status === 404 && z55_sb5.status === 404);
+
     console.log(`\n═══ RESULT: ${passed} passed, ${failed} failed ═══`);
     if (serverProc) serverProc.kill();
     process.exit(failed ? 1 : 0);

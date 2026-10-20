@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Garuda Konsole — Shared file</title>
+<meta name="robots" content="noindex" />
+<style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0b0e14; color: #e8edf4; font: 14px/1.5 'Inter', system-ui, sans-serif; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; padding: 20px 14px; }
+    .wrap { width: min(96vw, 1000px); display: flex; flex-direction: column; gap: 12px; }
+    header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    header h1 { font-size: 15px; font-weight: 700; word-break: break-all; }
+    .badge { font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #3daee9; background: rgba(61,174,233,.12); border: 1px solid rgba(61,174,233,.35); padding: 2px 9px; border-radius: 10px; }
+    .meta { font-size: 11px; color: #7d8590; margin-left: auto; }
+    .stage { background: #080a0f; border: 1px solid rgba(125,145,175,.18); border-radius: 12px; min-height: 260px; max-height: 70dvh; overflow: auto; display: flex; align-items: center; justify-content: center; }
+    .stage img { max-width: 100%; max-height: 70dvh; object-fit: contain; }
+    .stage video, .stage audio { width: 100%; }
+    .stage iframe { width: 100%; height: 70dvh; border: none; background: #fff; }
+    .stage pre { width: 100%; padding: 14px 16px; font: 12px/1.55 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; color: #d5dbe5; text-align: left; align-self: flex-start; }
+    .col { flex-direction: column; align-items: stretch; justify-content: center; gap: 14px; padding: 24px; }
+    button, a.btn { display: inline-block; background: rgba(61,174,233,.13); color: #3daee9; border: 1px solid rgba(61,174,233,.4); border-radius: 8px; padding: 9px 18px; font: 700 13px/1 inherit; cursor: pointer; text-decoration: none; text-align: center; }
+    button:hover, a.btn:hover { background: #3daee9; color: #08130c; }
+    .err { color: #ff5566; padding: 20px; text-align: center; }
+    footer { font-size: 11px; color: #5d6a7a; text-align: center; }
+    footer a { color: #3daee9; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <header>
+        <h1 id="name">Loading…</h1>
+        <span class="badge" id="mode">—</span>
+        <span class="meta" id="meta"></span>
+    </header>
+    <div class="stage" id="stage"></div>
+    <footer>Shared from <a href="/">Garuda Konsole</a> · link expires · view-only unless download enabled</footer>
+</div>
+<script>
+'use strict';
+/* Public single-file share viewer. The token IS the capability; no auth,
+   no app code, no cookies. Renders by MIME family with graceful notes. */
+const token = new URLSearchParams(location.search).get('r') || '';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function mdLite(src) {
+    let h = esc(src);
+    h = h.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>').replace(/^##\s+(.*)$/gm, '<h2>$1</h2>').replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
+    h = h.replace(/```([\s\S]*?)```/g, (m, c) => '<pre>' + c + '</pre>');
+    h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>').replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    h = h.replace(/^\s*[-*]\s+(.*)$/gm, '<li>$1</li>');
+    return h;
+}
+(async () => {
+    const stage = $('stage');
+    if (!token) { $('name').textContent = 'No share token'; return; }
+    let m;
+    try {
+        const r = await fetch('/api/fileshare/' + encodeURIComponent(token));
+        if (!r.ok) throw new Error(r.status === 410 ? 'This link has reached its view limit.' : r.status === 404 ? 'This share link has expired or been revoked.' : 'Error ' + r.status);
+        m = await r.json();
+    } catch (e) {
+        $('name').textContent = 'Share unavailable';
+        stage.className = 'stage col';
+        stage.innerHTML = '<div class="err"></div>';
+        stage.firstChild.textContent = String(e.message || e);
+        return;
+    }
+    document.title = m.name + ' — shared file';
+    $('name').textContent = m.name;
+    $('mode').textContent = m.mode;
+    $('meta').textContent = `${(m.size / 1024).toFixed(1)} KB · ${m.views}${m.maxViews ? '/' + m.maxViews : ''} views · expires ${new Date(m.expiresAt).toLocaleString()}`;
+    const contentUrl = '/api/fileshare/' + encodeURIComponent(token) + '/content';
+    const dlUrl = '/api/fileshare/' + encodeURIComponent(token) + '/download';
+
+    if (m.mode === 'download') {
+        stage.className = 'stage col';
+        stage.innerHTML = `<p style="color:#93a0b0">The sender enabled download-only for this file.</p><a class="btn" href="${dlUrl}"> Download ${esc(m.name)}</a>`;
+        return;
+    }
+    const kind = m.mime.split('/')[0];
+    if (kind === 'image') { stage.innerHTML = `<img alt="${esc(m.name)}" src="${contentUrl}">`; return; }
+    if (kind === 'audio') { stage.className = 'stage col'; stage.innerHTML = `<audio controls src="${contentUrl}"></audio>`; return; }
+    if (kind === 'video') { stage.className = 'stage col'; stage.innerHTML = `<video controls playsinline src="${contentUrl}"></video>`; return; }
+    if (m.mime === 'application/pdf') { stage.innerHTML = `<iframe src="${contentUrl}" title="PDF"></iframe>`; return; }
+    if (kind === 'text' || m.mime.includes('json')) {
+        const r = await fetch(contentUrl);
+        const t = await r.text();
+        stage.className = 'stage';
+        const pre = document.createElement('pre');
+        if (m.name.endsWith('.md')) pre.innerHTML = mdLite(t.slice(0, 400000));
+        else pre.textContent = t.slice(0, 400000) + (t.length > 400000 ? '\n… truncated …' : '');
+        stage.appendChild(pre);
+        return;
+    }
+    stage.className = 'stage col';
+    stage.innerHTML = `<p style="color:#93a0b0">No in-browser view for this type (${esc(m.mime)}).</p><a class="btn" href="${dlUrl}">⬇ Download instead</a>`;
+})();
+</script>
+</body>
+</html>

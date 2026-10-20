@@ -154,9 +154,10 @@ else if (!/api\/replay\//.test(replayHtml)) fail('replay player must fetch /api/
     else if (!/Emu\.prototype\.sgr/.test(replayHtml)) fail('replay player lost its SGR color emulator (players must render colors, not strip ANSI)');
 else ok('standalone replay player present');
 const srvjs = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-const missingRoutes = ['/api/layouts', '/api/files/write', '/api/processes', '/api/stats/history', '/api/replay/share', '/api/recordings'].filter((r) => !srvjs.includes(r));
+const missingRoutes = ['/api/layouts', '/api/files/write', '/api/processes', '/api/stats/history', '/api/replay/share', '/api/recordings', '/api/fileshare/create', '/api/sandbox/run'].filter((r) => !srvjs.includes(r));
 if (!srvjs.includes("url.pathname === '/ws/rd'")) fail('server missing the /ws/rd websocket branch');
 if (!fs.existsSync(path.join(__dirname, 'fixtures', 'rd-test.webm'))) fail('rd test fixture missing — run: node tools/make-rd-fixture.js');
+if (!fs.existsSync(path.join(PUB, 'fs.html'))) fail('public/fs.html (public file-share viewer) missing');
 const portalScript = fs.existsSync(path.join(__dirname, '..', 'tools', 'rd-screencast-portal.sh')) ? fs.readFileSync(path.join(__dirname, '..', 'tools', 'rd-screencast-portal.sh'), 'utf8') : '';
 if (!portalScript) fail('tools/rd-screencast-portal.sh missing (portal fallback capture)');
 else if (!/restore_token/.test(portalScript) || /persist_mode/.test(portalScript) === false) fail('portal capture script lost its restore-token persistence');

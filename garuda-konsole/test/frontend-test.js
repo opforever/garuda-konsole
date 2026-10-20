@@ -1363,6 +1363,41 @@ function visible(win, id) {
     check('close clears dynamic studio nodes', ev(win, `document.querySelectorAll('#preview-body .pv-dyn').length === 0 && document.getElementById('preview-modal').classList.contains('hidden')`));
     await ev(win, `['gk-pv.md','gk-pv.json','gk-pv.csv','gk-pv.bin'].forEach((f) => api('/api/files/delete', { method: 'POST', body: { path: f } }).catch(() => {}))`);
 
+
+    /* ── 5.5: fail chip + file shares + sandbox ── */
+    console.log('── 5.5: failure awareness (OSC 133) ──');
+    const failTab55 = ev(win, `Object.keys(tabs)[0]`);
+    ev(win, `handleOsc133(tabs[${JSON.stringify(failTab55)}], 'C;cmdline_url=false')`);
+    ev(win, `handleOsc133(tabs[${JSON.stringify(failTab55)}], 'D;1')`);
+    await tick(200);
+    check('OSC 133 D;1 raises the fail chip on the terminal', ev(win, `(() => { const c = tabs[${JSON.stringify(failTab55)}].termEl.querySelector('.fail-chip'); return !!c && !c.classList.contains('hidden'); })()`));
+    check('fail card pushed into AI pane with explain button', ev(win, `aiState.ui.some((i) => i.kind === 'fail' && i.status === 1)`));
+    ev(win, `(() => { const it = aiState.ui.filter((i) => i.kind === 'fail').pop(); aiExplainFailure(it.cmd, it.output, it.status); })()`);
+    await tick(300);
+    check('explain sends a fix prompt to the AI', ev(win, `(aiState.messages[aiState.messages.length - 1].content || '').includes('Diagnose the problem')`));
+    ev(win, `document.querySelector('.fail-chip').click()`);
+    await tick(100);
+    check('chip click hides the chip', ev(win, `document.querySelector('.fail-chip').classList.contains('hidden')`));
+
+    console.log('── 5.5: file share UI + sandbox modal ──');
+    await ev(win, `api('/api/files/write', { method: 'POST', body: { path: 'gk-fs-ui.txt', content: 'ui share' } })`);
+    await ev(win, `openFileShare('gk-fs-ui.txt')`);
+    await tick(300);
+    check('fileshare modal opens with path', ev(win, `!document.getElementById('fileshare-modal').classList.contains('hidden') && document.getElementById('fileshare-path').textContent === 'gk-fs-ui.txt'`));
+    await ev(win, `createFileShare()`);
+    await tick(500);
+    check('created link shows in result + list', ev(win, `!document.getElementById('fileshare-result').classList.contains('hidden') && document.getElementById('fileshare-url').value.includes('/fs.html?r=')`) && ev(win, `document.querySelectorAll('#fileshare-list .fshare-row').length >= 1`));
+    const tok55 = await ev(win, `document.getElementById('fileshare-url').value.split('r=').pop()`);
+    await ev(win, `revokeFileShare(${JSON.stringify(tok55)})`);
+    await tick(400);
+    check('revoke removes the row', ev(win, `![...document.querySelectorAll('#fileshare-list .fshare-row')].some((r) => r.textContent.includes('gk-fs-ui.txt'))`));
+    await ev(win, `document.querySelector('[data-action="fileshare-close"]').click()`);
+    await ev(win, `openSandboxModal()`);
+    await tick(400);
+    check('sandbox modal reports host availability honestly', ev(win, `/bubblewrap|overlay|throwaway/i.test(document.getElementById('sandbox-note').textContent)`));
+    await ev(win, `document.querySelector('[data-action="sandbox-close"]').click()`);
+    await ev(win, `api('/api/files/delete', { method: 'POST', body: { path: 'gk-fs-ui.txt' } }).catch(() => {})`);
+
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
     const relevant = fatalErrors.filter((e) => !/Could not load|favicon|Not implemented|blob:fake/i.test(e));

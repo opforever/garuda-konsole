@@ -1,8 +1,8 @@
-# Garuda Konsole 5.4.1 🦅
+# Garuda Konsole 5.5.0 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.4.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-469%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.5.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-488%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,38 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 🛟 What's new in 5.5.0 — failure awareness, branch sandbox, single-file shares
+
+1. **"Why did this fail?" — the terminal tells you when commands die.**
+   Fish (and any OSC-133 shell) already emits the exit status of every command;
+   Garuda now *listens*: a non-zero exit raises a floating **✖ exit N — why?**
+   chip over the terminal (25 s) **and** a fail card in the AI pane. One tap
+   sends the command + captured output slice to the AI with a fix-prompt and
+   the answer lands as a normal AI bubble. Covers user-typed AND agent-run
+   commands, no shell hooks to install.
+2. **Branch sandbox — run it without touching reality.** Palette →
+   *"Run in branch sandbox…"*: the command executes under **bubblewrap** with
+   `/` read-only and a copy-on-write layer over your HOME (`--overlay`,
+   tmpfs fallback detected at runtime). Live log in the modal; when it ends
+   you see every file the layer wrote and choose **Promote** (copies over
+   real files, `.bak` of each original, protected paths refused) or
+   **Discard**. No bwrap → honest 503 + install hint, never a silent no-op.
+3. **Single-file share links with real settings.** Files → new 🔗 button:
+   mode (**view in browser** via the public `fs.html` viewer, or
+   **download-only**), expiry (1 h / 6 h / 24 h / 7 d / custom ≤14 d,
+   remembered as your default), optional **max-views cap**. Active links
+   list with view counters, copy + **revoke**; expired/revoked links show a
+   clean message. Public routes are token-as-capability, `no-store`,
+   MIME-aware; 200 MB cap; protected paths refused.
+
+Guarded by +11 API checks (share lifecycle incl. 410 view-cap & attachment
+headers, sandbox 404/503 matrix), +8 frontend E2E (OSC-133 chip → card →
+fix prompt, share UI lifecycle, sandbox honesty), static guards
+(fileshare/sandbox routes, fs.html). `tools/verify-rigorous.js` grows S8–S10
+(public viewer unauthenticated, download page, revoke message, real-browser
+fail chip + click-through, sandbox degradation): **42 checks total**.
+Suite: API 199, frontend 289, statics green. Version lockstep 5.5.0.
 
 ## 🔬 What's new in 5.4.1 — rigor-pass fixes (real-browser auditing)
 

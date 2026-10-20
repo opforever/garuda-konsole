@@ -32,7 +32,7 @@ const ck = (n, c, x) => { results.push({ n, ok: !!c }); console.log((c ? '  ✔ 
 
     /* ── S1 boot, login, SW hygiene ── */
     console.log('── S1 boot / login / service worker ──');
-    await page.addInitScript(() => { try { localStorage.setItem('gk_tour_done', 'true'); localStorage.setItem('gk_news_seen', JSON.stringify('5.4.0')); } catch (e) {} });
+    await page.addInitScript(() => { try { localStorage.setItem('gk_tour_done', 'true'); localStorage.setItem('gk_news_seen', JSON.stringify('5.5.0')); } catch (e) {} });
     await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1500);
     for (let a = 0; a < 6; a++) {
@@ -44,6 +44,9 @@ const ck = (n, c, x) => { results.push({ n, ok: !!c }); console.log((c ? '  ✔ 
         try { await page.waitForSelector('.xterm', { timeout: 8000 }); break; } catch (e) {}
     }
     await page.waitForTimeout(2000);
+    await page.waitForFunction(() => { const o = document.getElementById('boot-overlay'); return !o || o.classList.contains('hidden'); }, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(600); // fade-out tail
+    await page.evaluate(() => { try { storeSet(K.newsSeen, APP_VERSION); } catch (e) {} document.querySelectorAll('.modal-overlay').forEach((m) => m.classList.add('hidden')); });
     const skip = await page.$('[data-action="tour-skip"]');
     if (skip) { await skip.click({ force: true }).catch(() => {}); await page.waitForTimeout(600); }
     await page.evaluate(() => document.querySelectorAll('.modal-overlay').forEach((m) => m.classList.add('hidden')));
@@ -54,6 +57,8 @@ const ck = (n, c, x) => { results.push({ n, ok: !!c }); console.log((c ? '  ✔ 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(3500);
     ck('reload via SW-served assets: app still boots', await page.evaluate(() => !!document.querySelector('.xterm')));
+    await page.waitForFunction(() => { const o = document.getElementById('boot-overlay'); return !o || o.classList.contains('hidden'); }, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(600);
     ck('reload produced no new console errors', consoleErrors.length === errsBeforeReload, consoleErrors.slice(errsBeforeReload).join(' | '));
 
     /* ── S2 terminal regression ── */
@@ -69,8 +74,22 @@ const ck = (n, c, x) => { results.push({ n, ok: !!c }); console.log((c ? '  ✔ 
     /* ── S3 context menu regression (5.1.6) ── */
     console.log('── S3 context menu affordance ──');
     const termBox = await page.locator('.xterm').boundingBox();
+    await page.evaluate(() => hideContextMenu());
     await page.mouse.click(termBox.x + termBox.width / 2, termBox.y + termBox.height / 2, { button: 'right' });
     await page.waitForTimeout(500);
+    let ctxCount = await page.evaluate(() => document.querySelectorAll('#context-menu .ctx-item').length);
+    if (!ctxCount) { // one retry: overlays/toasts can eat a right-click
+        await page.mouse.click(termBox.x + termBox.width / 2, termBox.y + termBox.height / 2 + 30, { button: 'right' });
+        await page.waitForTimeout(600);
+        ctxCount = await page.evaluate(() => document.querySelectorAll('#context-menu .ctx-item').length);
+    }
+    if (!ctxCount) {
+        const dbg = await page.evaluate(([x, y]) => {
+            const e = document.elementFromPoint(x, y);
+            return { efp: e ? (e.className || e.tagName) : null, boot: (document.getElementById('boot-overlay') || {}).className, tour: (document.querySelector('.tour-root') || {}).className, modalOpen: [...document.querySelectorAll('.modal-overlay')].filter((m) => !m.classList.contains('hidden')).map((m) => m.id) };
+        }, [termBox.x + termBox.width / 2, termBox.y + termBox.height / 2]);
+        console.log('   S3 debug:', JSON.stringify(dbg));
+    }
     const ctx = await page.evaluate(() => {
         const items = [...document.querySelectorAll('#context-menu .ctx-item')];
         const root = getComputedStyle(document.documentElement);
@@ -84,7 +103,7 @@ const ck = (n, c, x) => { results.push({ n, ok: !!c }); console.log((c ? '  ✔ 
             enabledOpacity: enabled ? getComputedStyle(enabled).opacity : null
         };
     });
-    ck('ctx menu opens with entries', ctx.n >= 8, ctx.n + ' items');
+    ck('ctx menu opens with entries', ctxCount >= 8 && ctx.n >= 8, ctx.n + ' items');
     const hexToRgb = (h) => { const m = String(h).replace('#', ''); const v = [0, 2, 4].map((i) => parseInt(m.substr(i, 2), 16)); return `rgb(${v[0]}, ${v[1]}, ${v[2]})`; };
     ck('enabled entries wear full theme text color', !!ctx.enabledColor && ctx.enabledColor === hexToRgb(ctx.textColor), `${ctx.enabledColor} vs ${ctx.textColor}`);
     ck('enabled opacity 1 / disabled inert', ctx.enabledOpacity === '1' && ctx.disabledInert === true);
@@ -269,6 +288,61 @@ const ck = (n, c, x) => { results.push({ n, ok: !!c }); console.log((c ? '  ✔ 
         await page.setViewportSize({ width: 1280, height: 860 });
     }
 
+    /* ── S8 single-file share links (public viewer, revoke) ── */
+    console.log('── S8 file share links ──');
+    await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2500);
+    await page.evaluate(() => api('/api/files/write', { method: 'POST', body: { path: 'rigor-share.md', content: '# shared doc\n\nRIGOR-SHARE-BODY text' } }));
+    const sh1 = await page.evaluate(() => api('/api/fileshare/create', { method: 'POST', body: { path: 'rigor-share.md', mode: 'view', expiresH: 1 } }));
+    ck('share created (view mode)', !!sh1.token && sh1.url.startsWith('/fs.html?r='));
+    await page.goto(`http://localhost:${PORT}${sh1.url}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+    const fsView = await page.evaluate(() => ({
+        name: document.getElementById('name').textContent,
+        text: (document.querySelector('#stage pre') || {}).textContent || '',
+        mode: document.getElementById('mode').textContent
+    }));
+    ck('public viewer renders md unauthenticated', /RIGOR-SHARE-BODY/.test(fsView.text) && fsView.name === 'rigor-share.md' && fsView.mode === 'view', JSON.stringify(fsView).slice(0, 90));
+    await page.screenshot({ path: path.join(SHOTS, 'rigor-fs-view.png') });
+    const sh2 = await page.evaluate((p) => fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: '20090228' }) }).then((r) => r.json()).then((l) => fetch('/api/fileshare/create', { method: 'POST', headers: { Authorization: 'Bearer ' + l.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p, mode: 'download', expiresH: 6 }) }).then((r) => r.json())), 'rigor-share.md');
+    await page.goto(`http://localhost:${PORT}/api/fileshare/${sh2.token}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(800);
+    await page.goto(`http://localhost:${PORT}${sh2.url}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#stage a[href*="/download"]', { timeout: 8000 }).catch(() => {});
+    const dlBtn = await page.evaluate(() => ({ ok: !!document.querySelector('#stage a[href*="/download"]'), stage: document.getElementById('stage').innerHTML.slice(0, 160) }));
+    ck('download-mode page offers the file button', dlBtn.ok, dlBtn.stage);
+    await page.evaluate((t) => fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: '20090228' }) }).then((r) => r.json()).then((l) => fetch('/api/fileshare/revoke', { method: 'POST', headers: { Authorization: 'Bearer ' + l.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t }) })), sh1.token);
+    await page.goto(`http://localhost:${PORT}${sh1.url}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(800);
+    ck('revoked link shows expiry message', await page.evaluate(() => /expired or been revoked/i.test(document.getElementById('stage').textContent)));
+
+    /* ── S9 fail chip via real OSC 133 path ── */
+    console.log('── S9 failure awareness in real browser ──');
+    await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2500);
+    await page.evaluate(() => { const t = tabs[activeTabId]; handleOsc133(t, 'C;cmdline_url=rm%20-nope'); handleOsc133(t, 'D;127'); });
+    await page.waitForTimeout(400);
+    const chip = await page.evaluate(() => { const c = document.querySelector('.terminal-container:not([style*="hidden"]) .fail-chip') || document.querySelector('.fail-chip'); return c ? { hidden: c.classList.contains('hidden'), text: c.textContent } : null; });
+    ck('fail chip visible over terminal with exit code', !!chip && !chip.hidden && /exit 127/.test(chip.text), JSON.stringify(chip));
+    await page.screenshot({ path: path.join(SHOTS, 'rigor-failchip.png') });
+    await page.evaluate(() => document.querySelector('.fail-chip').click());
+    let explained = false;
+    for (let i = 0; i < 20 && !explained; i++) {
+        explained = await page.evaluate(() => !document.getElementById('ai-drawer').classList.contains('hidden') && aiState.messages.slice(-3).some((m) => (m.content || '').includes('Diagnose the problem')));
+        if (!explained) await page.waitForTimeout(250);
+    }
+    ck('chip click opens AI drawer with fix prompt', explained);
+
+    /* ── S10 sandbox graceful degradation ── */
+    console.log('── S10 branch sandbox (no bwrap here) ──');
+    await page.evaluate(() => openSandboxModal());
+    await page.waitForTimeout(600);
+    ck('sandbox modal reports honest status', await page.evaluate(() => /bubblewrap|overlay|throwaway/i.test(document.getElementById('sandbox-note').textContent)));
+    await page.evaluate(() => { document.getElementById('sandbox-cmd').value = 'echo hi'; runSandbox(); });
+    await page.waitForTimeout(900);
+    ck('run without bwrap degrades to a clear error', await page.evaluate(() => /bubblewrap|bwrap|503/i.test(document.getElementById('sandbox-log').textContent)));
+    await page.evaluate(() => { const m = $('sandbox-modal'); if (m) m.classList.add('hidden'); sandboxPollStop(); });
+
     /* ── S7 session persistence + logout ── */
     console.log('── S7 session persistence ──');
     await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'domcontentloaded' });
@@ -277,11 +351,11 @@ const ck = (n, c, x) => { results.push({ n, ok: !!c }); console.log((c ? '  ✔ 
     ck('session cookie survives navigation (auto-login)', backIn);
     await page.evaluate(() => { void lockSession(); });
     await page.waitForSelector('#confirm-modal:not(.hidden)', { timeout: 5000 });
-    await page.click('#confirm-ok');
+    await page.evaluate(() => document.getElementById('confirm-ok').click());
     await page.waitForTimeout(3000); // lockSession reloads the page
     ck('logout (lock session) returns to the lockscreen', await page.evaluate(() => !document.getElementById('lockscreen').classList.contains('hidden')));
 
-    const relevant = consoleErrors.filter((e) => !/favicon|Could not load|Not implemented|Failed to load resource.*404|net::ERR/i.test(e));
+    const relevant = consoleErrors.filter((e) => !/favicon|Could not load|Not implemented|Failed to load resource: the server responded with a status of (404|410|502|503)|net::ERR/i.test(e));
     ck('no unexpected console/page errors across whole run', relevant.length === 0, relevant.slice(0, 4).join(' | '));
     console.log('screenshots in', SHOTS);
     const failed = results.filter((r) => !r.ok);
