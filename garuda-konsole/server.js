@@ -34,7 +34,7 @@ try {
 
 /* ──────────────────────────── Configuration ──────────────────────────── */
 
-const VERSION = '5.5.0';
+const VERSION = '5.5.1';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const PASSWORD = process.env.KONSOLE_PASSWORD || '20090228';
@@ -1271,34 +1271,57 @@ app.get('/api/fileshare/:token/download', (req, res) => {
 
 const sandboxRuns = new Map(); // id → { id, taskId, layer, cmd, createdAt, files }
 function bwrapBin() { return rdHasBin('bwrap') ? 'bwrap' : null; }
+/* POSIX single-quote. The wrap string is parsed by the user's login shell
+   (bash/zsh/fish) via `shell -c`, so every interpolated path — and the inner
+   command itself — must be single-quoted. (JSON.stringify double-quotes let
+   the OUTER shell expand `$vars` inside the inner command first, and break
+   on any path with a space.) The '\'' idiom works in fish too. */
+function shq(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
+/* Overlay capability probe. bwrap 0.9.0 introduced --overlay and --overlay-src
+   TOGETHER, and --overlay hard-fails without a preceding --overlay-src
+   ("bwrap: --overlay requires at least one --overlay-src"). Older releases
+   (≤ 0.8.0) have neither flag. So: overlay mode requires BOTH in --help;
+   anything else degrades to the empty-tmpfs-home fallback. */
+function bwrapCaps() {
+    const bin = bwrapBin();
+    if (!bin) return { bin: null, overlay: false };
+    let help = '';
+    try { help = require('child_process').spawnSync(bin, ['--help']).stdout.toString(); } catch (e) {}
+    const overlay = /--overlay\s/.test(help) && /--overlay-src/.test(help);
+    return { bin, overlay };
+}
 app.get('/api/sandbox/status', requireAuth, (req, res) => {
-    const b = bwrapBin();
-    let overlay = false;
-    if (b) {
-        try { overlay = /--overlay/.test(require('child_process').spawnSync(b, ['--help']).stdout.toString()); } catch (e) {}
-    }
-    res.json({ available: !!b, overlay, hint: b ? null : 'install bubblewrap: sudo pacman -S bubblewrap' });
+    const caps = bwrapCaps();
+    res.json({ available: !!caps.bin, overlay: caps.overlay, hint: caps.bin ? null : 'install bubblewrap: sudo pacman -S bubblewrap' });
 });
 app.post('/api/sandbox/run', requireAuth, (req, res) => {
     const cmd = req.body && typeof req.body.cmd === 'string' ? req.body.cmd.trim() : '';
     if (!cmd || cmd.length > 4000) return res.status(400).json({ error: 'cmd required (max 4000)' });
-    const b = bwrapBin();
-    if (!b) return res.status(503).json({ error: 'bubblewrap (bwrap) is not installed on the host — sudo pacman -S bubblewrap' });
+    const caps = bwrapCaps();
+    if (!caps.bin) return res.status(503).json({ error: 'bubblewrap (bwrap) is not installed on the host — sudo pacman -S bubblewrap' });
     const id = 'sbx_' + crypto.randomBytes(6).toString('hex');
     const layer = path.join(os.tmpdir(), 'gk-sbx-' + id);
     fs.mkdirSync(path.join(layer, 'up'), { recursive: true });
     fs.mkdirSync(path.join(layer, 'wk'), { recursive: true });
     const home = process.env.HOME || os.homedir();
-    let overlay = true;
-    try { overlay = /--overlay/.test(require('child_process').spawnSync(b, ['--help']).stdout.toString()); } catch (e) { overlay = false; }
-    const wrap = overlay
-        ? `${b} --die-with-parent --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp --overlay ${layer}/up ${layer}/wk ${home} sh -c ${JSON.stringify(cmd)}`
-        : `${b} --die-with-parent --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp --tmpfs ${home} sh -c ${JSON.stringify(cmd)}`;
+    /* bwrap applies filesystem ops in command-line order and resolves every
+       source path against the ORIGINAL host root (/oldroot), so `--tmpfs /tmp`
+       can never shadow the layer dirs even when they live under /tmp.
+       --overlay-src MUST immediately precede --overlay (bwrap ≥ 0.9.0). */
+    const base = `${shq(caps.bin)} --die-with-parent --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp`;
+    const wrap = caps.overlay
+        ? `${base} --overlay-src ${shq(home)} --overlay ${shq(path.join(layer, 'up'))} ${shq(path.join(layer, 'wk'))} ${shq(home)} sh -c ${shq(cmd)}`
+        : `${base} --tmpfs ${shq(home)} sh -c ${shq(cmd)}`;
     const result = runTask({ name: 'sandbox: ' + cmd.split('\n')[0].slice(0, 50), cmd: wrap, cwd: null, notify: req.body.notify !== false });
     if (result.error) return res.status(400).json({ error: result.error });
-    sandboxRuns.set(id, { id, taskId: result.id, layer, cmd, createdAt: Date.now(), files: null, overlay });
-    while (sandboxRuns.size > 10) sandboxRuns.delete(sandboxRuns.keys().next().value);
-    res.json({ success: true, id, taskId: result.id, overlay });
+    sandboxRuns.set(id, { id, taskId: result.id, layer, cmd, createdAt: Date.now(), files: null, overlay: caps.overlay });
+    while (sandboxRuns.size > 10) {
+        const oldest = sandboxRuns.keys().next().value;
+        const rec = sandboxRuns.get(oldest);
+        if (rec) sandboxRmLayer(rec.layer); // evicted runs must not leak their layer dirs
+        sandboxRuns.delete(oldest);
+    }
+    res.json({ success: true, id, taskId: result.id, overlay: caps.overlay });
 });
 function sandboxChanges(rec) {
     if (rec.files) return rec.files;
@@ -1312,8 +1335,12 @@ function sandboxChanges(rec) {
             let st = null;
             try { st = fs.lstatSync(abs); } catch (e) { continue; }
             const r = rel ? rel + '/' + n : n;
+            /* overlayfs records a deleted lower file/dir as a whiteout:
+               a character device with major 0, minor 0 (rdev === 0). */
+            if (st.isCharacterDevice() && st.rdev === 0) { out.push({ rel: r, size: 0, deleted: true }); continue; }
             if (st.isDirectory()) walk(abs, r);
             else if (st.isFile()) out.push({ rel: r, size: st.size });
+            else if (st.isSymbolicLink()) out.push({ rel: r, size: 0, symlink: true });
             if (out.length >= 500) return;
         }
     };
@@ -1336,6 +1363,13 @@ app.post('/api/sandbox/:id/promote', requireAuth, (req, res) => {
     const wanted = Array.isArray(req.body && req.body.paths) ? req.body.paths : null;
     const files = sandboxChanges(rec);
     const done = [], skipped = [];
+    const existsL = (p) => { try { fs.lstatSync(p); return true; } catch (e) { return false; } };
+    /* reversible removal: the real target is renamed to <name>.bak, never unlinked */
+    const bakAside = (p) => {
+        const bak = p + '.bak';
+        try { fs.rmSync(bak, { recursive: true, force: true }); } catch (e) {}
+        fs.renameSync(p, bak);
+    };
     for (const f of files) {
         if (wanted && !wanted.includes(f.rel)) continue;
         const src = path.join(rec.layer, 'up', f.rel);
@@ -1343,7 +1377,21 @@ app.post('/api/sandbox/:id/promote', requireAuth, (req, res) => {
         if (!dst.startsWith(home + path.sep)) { skipped.push(f.rel); continue; }
         if (PROTECTED_PATHS.has(dst)) { skipped.push(f.rel); continue; }
         try {
+            if (f.deleted) {
+                /* the sandbox deleted this path — apply the deletion for real (as .bak) */
+                if (!existsL(dst)) { done.push(f.rel); continue; } // already gone on the host: nothing to do
+                bakAside(dst);
+                done.push(f.rel);
+                continue;
+            }
             fs.mkdirSync(path.dirname(dst), { recursive: true });
+            if (f.symlink) {
+                const target = fs.readlinkSync(src);
+                if (existsL(dst)) bakAside(dst);
+                fs.symlinkSync(target, dst);
+                done.push(f.rel);
+                continue;
+            }
             if (fs.existsSync(dst)) fs.copyFileSync(dst, dst + '.bak');
             fs.copyFileSync(src, dst);
             done.push(f.rel);
@@ -1351,10 +1399,24 @@ app.post('/api/sandbox/:id/promote', requireAuth, (req, res) => {
     }
     res.json({ success: true, done, skipped });
 });
+/* overlayfs creates its internal work dir (<layer>/wk/work) with mode 000 by
+   design — even the owner cannot readdir it without chmod'ing it open first,
+   so a plain rmSync throws EACCES and leaks layer remnants after every run.
+   Walk the tree relaxing unreadable dirs, then remove. */
+function sandboxRmLayer(dir) {
+    const openUp = (d) => {
+        let ents = null;
+        try { ents = fs.readdirSync(d, { withFileTypes: true }); }
+        catch (e) { try { fs.chmodSync(d, 0o700); ents = fs.readdirSync(d, { withFileTypes: true }); } catch (e2) { return; } }
+        for (const en of ents) { if (en.isDirectory()) openUp(path.join(d, en.name)); }
+    };
+    openUp(dir);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
+}
 app.post('/api/sandbox/:id/discard', requireAuth, (req, res) => {
     const rec = sandboxRuns.get(req.params.id);
     if (!rec) return res.status(404).json({ error: 'not found' });
-    try { fs.rmSync(rec.layer, { recursive: true, force: true }); } catch (e) {}
+    sandboxRmLayer(rec.layer);
     sandboxRuns.delete(req.params.id);
     res.json({ success: true });
 });

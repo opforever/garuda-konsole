@@ -168,6 +168,17 @@ const missingFns = ['handleTabHealth', 'openEditor', 'restoreLayout', 'shareRepl
 if (missingFns.length) fail('ui.js missing 5.2 functions: ' + missingFns.join(', '));
 else ok('5.2 client functions present (badge / editor / layouts / replay / procs)');
 
+/* 5e. 5.5.1 sandbox overlay guards — bwrap ≥ 0.9 rejects --overlay without a preceding --overlay-src */
+if (!/--overlay-src \$\{shq\(home\)\} --overlay /.test(srvjs)) fail('sandbox run must pass --overlay-src immediately before --overlay (bwrap ≥ 0.9.0 dies with "--overlay requires at least one --overlay-src" otherwise)');
+else if (!/function shq\(/.test(srvjs)) fail('sandbox run must shell-quote interpolated paths/cmd via shq() (wrap string is parsed by the login shell)');
+else if (!/isCharacterDevice\(\) && st\.rdev === 0/.test(srvjs)) fail('sandboxChanges must detect overlayfs whiteouts (char 0:0) as deletions');
+else if (!/if \(f\.deleted\)/.test(srvjs)) fail('sandbox promote must apply deletions (reversible .bak move)');
+else if (!/function sandboxRmLayer\(/.test(srvjs)) fail('sandbox discard must use sandboxRmLayer (overlayfs work dirs are mode 000 — plain rmSync leaks remnants with EACCES)');
+else ok('sandbox overlay command (--overlay-src before --overlay, shq-quoted) + whiteout deletion promote intact (5.5.1)');
+if (!/sbx-del/.test(uijs)) fail('ui.js must render sandbox deletions with the sbx-del marker');
+else if (!/\.sbx-del\s*\{/.test(css)) fail('style.css must define .sbx-del');
+else ok('sandbox deletion rendering present (ui.js + style.css)');
+
 /* 6. Cross-file function references */
 console.log('═══ cross-file function check ═══');
 const definedFns = new Set();

@@ -5574,7 +5574,7 @@ async function openSandboxModal() {
     if (note) {
         if (!st || !st.available) { note.textContent = 'bubblewrap is NOT installed on the host — install with: sudo pacman -S bubblewrap'; note.classList.remove('hidden'); }
         else if (!st.overlay) { note.textContent = 'bwrap present but without --overlay: sandbox home will be an empty tmpfs (writes isolated, reads invisible).'; note.classList.remove('hidden'); }
-        else { note.textContent = 'Writes land in a throwaway layer over your HOME; reads see the real system. Promote or discard afterwards.'; note.classList.remove('hidden'); }
+        else { note.textContent = 'Writes and deletions land in a throwaway layer over your HOME; reads see the real system. Promote or discard afterwards.'; note.classList.remove('hidden'); }
     }
 }
 async function runSandbox() {
@@ -5616,17 +5616,19 @@ async function refreshSandboxChanges() {
     try {
         const d = await api(`/api/sandbox/${sandboxState.id}/changes`);
         host.innerHTML = d.files.length
-            ? d.files.map((f) => `<div class="fshare-row"><span class="fshare-name">${escHtml(f.rel)}</span><span class="fshare-meta">${fmtBytes(f.size)}</span></div>`).join('')
-            : '<div class="setting-subtitle">No files written in the sandbox layer.</div>';
+            ? d.files.map((f) => f.deleted
+                ? `<div class="fshare-row"><span class="fshare-name sbx-del">✖ ${escHtml(f.rel)}</span><span class="fshare-meta">deleted</span></div>`
+                : `<div class="fshare-row"><span class="fshare-name">${escHtml(f.rel)}</span><span class="fshare-meta">${f.symlink ? 'symlink' : fmtBytes(f.size)}</span></div>`).join('')
+            : '<div class="setting-subtitle">No files written or deleted in the sandbox layer.</div>';
     } catch (e) { host.innerHTML = ''; }
 }
 async function promoteSandbox() {
     if (!sandboxState.id) return;
-    const ok = await showConfirm({ title: 'Promote sandbox writes?', message: 'Copies every file the sandbox wrote over your REAL home (existing files get a .bak). Continue?', okLabel: 'Promote' });
+    const ok = await showConfirm({ title: 'Promote sandbox changes?', message: 'Applies every sandbox change to your REAL home: written files copy over (originals get a .bak), deletions move the real target to <name>.bak. Continue?', okLabel: 'Promote' });
     if (!ok) return;
     try {
         const r = await api(`/api/sandbox/${sandboxState.id}/promote`, { method: 'POST', body: {} });
-        showToast({ type: 'success', title: `Promoted ${r.done.length} file(s)`, text: r.skipped.length ? r.skipped.length + ' skipped (protected)' : '', duration: 4000 });
+        showToast({ type: 'success', title: `Promoted ${r.done.length} change(s)`, text: r.skipped.length ? r.skipped.length + ' skipped (protected)' : '', duration: 4000 });
         await discardSandbox(true);
     } catch (e) { showToast({ type: 'error', title: 'Promote failed', text: String(e.message || e) }); }
 }

@@ -1,8 +1,8 @@
-# Garuda Konsole 5.5.0 🦅
+# Garuda Konsole 5.5.1 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.5.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-488%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.5.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-494%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,45 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 🩹 What's new in 5.5.1 — branch sandbox that actually sandboxes
+
+Real-user reported: every sandbox run died instantly with
+`bwrap: --overlay requires at least one --overlay-src`, and even a "successful"
+run showed *No files written in the sandbox layer* after deletions. Root causes
+found and fixed, each verified end-to-end against a real bubblewrap 0.11.0
+overlay (unprivileged user, live server):
+
+1. **The overlay command was built with syntax that never existed.** bwrap 0.9.0
+   introduced `--overlay` and `--overlay-src` *together*: the lower (read) layer
+   must be declared with `--overlay-src` immediately before
+   `--overlay RWSRC WORKDIR DEST`. The run endpoint now emits
+   `--overlay-src $HOME --overlay <layer>/up <layer>/wk $HOME`, and capability
+   detection tests the help output for **both** flags (older bwrap without
+   overlay support still degrades honestly to the empty-tmpfs home).
+2. **Shell-quoting hardened.** The wrap string is parsed by your login shell
+   (fish included), so every interpolated path and the inner command now go
+   through POSIX single-quoting (`shq`) instead of `JSON.stringify` — `$vars`
+   in your command are no longer expanded by the *outer* shell before the
+   sandbox sees them, and paths with spaces work.
+3. **Deletions are first-class changes.** overlayfs records a deleted file or
+   tree as a *whiteout* (char device 0:0) in the layer — the changes walker
+   used to skip those, so `rm -rf clips` reported "no files written". Deletions
+   (and symlinks) are now detected, listed in the modal with a red ✖ strike-through
+   (`sbx-del`), and **Promote** applies them reversibly: the real target is
+   renamed to `<name>.bak`, never unlinked. Header/confirm/toast copy updated
+   ("Changes captured in the layer", promote explains the .bak behaviour).
+4. **Discard no longer leaks layer remnants.** overlayfs creates its internal
+   work dir (`wk/work`) with mode `000` — plain `rmSync` died with EACCES on
+   every run and the layer stayed behind forever. `sandboxRmLayer()` chmods
+   unreadable dirs open first, then removes (E2E-asserted: zero leftovers).
+
+Verified: `rm -rf clips` in the sandbox leaves the real `clips/` untouched, the
+layer captures the whiteouts, Promote moves the originals to `.bak`, Discard
+wipes the layer completely. Suite grows to **API 202, frontend 292** (+3 API
+lifecycle, +3 frontend deletion-render E2E) with new static guards
+(`--overlay-src` before `--overlay`, whiteout detection, `sandboxRmLayer`,
+`sbx-del` styling). Version lockstep 5.5.1.
 
 ## 🛟 What's new in 5.5.0 — failure awareness, branch sandbox, single-file shares
 

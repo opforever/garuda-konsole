@@ -1395,6 +1395,28 @@ function visible(win, id) {
     await ev(win, `openSandboxModal()`);
     await tick(400);
     check('sandbox modal reports host availability honestly', ev(win, `/bubblewrap|overlay|throwaway/i.test(document.getElementById('sandbox-note').textContent)`));
+    /* 5.5.1: deletions captured in the layer must render distinctly (stubbed changes API) */
+    await ev(win, `(function(){
+        sandboxState = { id: 'sbx_uifix', taskId: null, timer: null, done: true };
+        const prev = window.fetch;
+        window.__restoreSbxFetch = function(){ window.fetch = prev; };
+        window.fetch = function(url, opts){
+            if (String(url).includes('/api/sandbox/sbx_uifix/changes')) {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ files: [
+                    { rel: 'new.txt', size: 12 },
+                    { rel: 'clips', size: 0, deleted: true },
+                    { rel: 'lnk', size: 0, symlink: true }
+                ], layer: '/tmp/gk-sbx-sbx_uifix' }) });
+            }
+            return prev(url, opts);
+        };
+    })()`);
+    await ev(win, `refreshSandboxChanges()`);
+    await tick(200);
+    check('sandbox change list renders writes', ev(win, `document.getElementById('sandbox-changes').textContent.includes('new.txt')`));
+    check('sandbox deletions render with the sbx-del marker', ev(win, `(() => { const d = document.querySelector('#sandbox-changes .sbx-del'); return !!d && d.textContent.includes('clips') && d.closest('.fshare-row').textContent.includes('deleted'); })()`));
+    check('sandbox symlinks labelled', ev(win, `document.getElementById('sandbox-changes').textContent.includes('symlink')`));
+    await ev(win, `window.__restoreSbxFetch(); sandboxState = { id: null, taskId: null, timer: null, done: false }; document.getElementById('sandbox-changes').innerHTML = '';`);
     await ev(win, `document.querySelector('[data-action="sandbox-close"]').click()`);
     await ev(win, `api('/api/files/delete', { method: 'POST', body: { path: 'gk-fs-ui.txt' } }).catch(() => {})`);
     await ev(win, `api('/api/files/delete', { method: 'POST', body: { path: 'gk-fs-ui.txt.bak' } }).catch(() => {})`);

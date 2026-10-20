@@ -956,10 +956,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     console.log('── 5.5: branch sandbox guards ──');
     const z55_sb1 = await j(`${B}/api/sandbox/status`, { headers: H });
-    check('sandbox status reports availability', z55_sb1.status === 200 && typeof z55_sb1.body.available === 'boolean');
+    check('sandbox status reports availability', z55_sb1.status === 200 && typeof z55_sb1.body.available === 'boolean' && typeof z55_sb1.body.overlay === 'boolean');
     const z55_sb2 = await j(`${B}/api/sandbox/run`, { method: 'POST', headers: z52_JH, body: JSON.stringify({ cmd: 'echo hi' }) });
-    if (z55_sb1.body.available) check('sandbox run accepts cmd', z55_sb2.status === 200 && z55_sb2.body.id);
-    else check('sandbox run 503 without bubblewrap', z55_sb2.status === 503);
+    if (z55_sb1.body.available) {
+        check('sandbox run accepts cmd + overlay flag matches status', z55_sb2.status === 200 && z55_sb2.body.id && z55_sb2.body.overlay === z55_sb1.body.overlay);
+        const z55_sbL = await j(`${B}/api/sandbox`, { headers: H });
+        check('sandbox list contains the run', z55_sbL.status === 200 && (z55_sbL.body.runs || []).some((r) => r.id === z55_sb2.body.id));
+        const z55_sbC = await j(`${B}/api/sandbox/${z55_sb2.body.id}/changes`, { headers: H });
+        check('changes endpoint returns the (empty) layer for echo', z55_sbC.status === 200 && Array.isArray(z55_sbC.body.files) && z55_sbC.body.files.length === 0);
+        const z55_sbD = await j(`${B}/api/sandbox/${z55_sb2.body.id}/discard`, { method: 'POST', headers: z52_JH, body: JSON.stringify({}) });
+        const z55_sbA = await j(`${B}/api/sandbox/${z55_sb2.body.id}/changes`, { headers: H });
+        check('discard removes run + layer (changes 404 after)', z55_sbD.status === 200 && z55_sbD.body.success === true && z55_sbA.status === 404);
+    } else {
+        check('sandbox run 503 without bubblewrap', z55_sb2.status === 503);
+    }
     const z55_sb3 = await j(`${B}/api/sandbox/sbx_nope/changes`, { headers: H });
     const z55_sb4 = await j(`${B}/api/sandbox/sbx_nope/promote`, { method: 'POST', headers: z52_JH, body: JSON.stringify({}) });
     const z55_sb5 = await j(`${B}/api/sandbox/sbx_nope/discard`, { method: 'POST', headers: z52_JH, body: JSON.stringify({}) });
