@@ -355,6 +355,10 @@ const ck = (n, c, x) => { results.push({ n, ok: !!c }); console.log((c ? '  ✔ 
     await page.waitForTimeout(3000); // lockSession reloads the page
     ck('logout (lock session) returns to the lockscreen', await page.evaluate(() => !document.getElementById('lockscreen').classList.contains('hidden')));
 
+    await page.evaluate(() => {
+        ['rigor.xlsx', 'rigor.docx', 'rigor.zip', 'rigor-bad.zip', 'rigor-bad.docx', 'rigor-bad.png', 'rigor-empty.log', 'rigor-empty.log.bak', 'rigor-big.log', 'rigor-big.log.bak', 'rigor-big.bin', 'my file (v2).md', 'rigor-share.md', 'rigor2.zip', 'rigor2.docx', 'rigor3.docx', 'gk-pv-demo.md', 'gk-pv-demo.csv', 'gk-pv-demo.bin']
+            .forEach((f) => api('/api/files/delete', { method: 'POST', body: { path: f } }).catch(() => {}));
+    }).catch(() => {});
     const relevant = consoleErrors.filter((e) => !/favicon|Could not load|Not implemented|Failed to load resource: the server responded with a status of (404|410|502|503)|net::ERR/i.test(e));
     ck('no unexpected console/page errors across whole run', relevant.length === 0, relevant.slice(0, 4).join(' | '));
     console.log('screenshots in', SHOTS);

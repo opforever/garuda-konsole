@@ -1397,6 +1397,7 @@ function visible(win, id) {
     check('sandbox modal reports host availability honestly', ev(win, `/bubblewrap|overlay|throwaway/i.test(document.getElementById('sandbox-note').textContent)`));
     await ev(win, `document.querySelector('[data-action="sandbox-close"]').click()`);
     await ev(win, `api('/api/files/delete', { method: 'POST', body: { path: 'gk-fs-ui.txt' } }).catch(() => {})`);
+    await ev(win, `api('/api/files/delete', { method: 'POST', body: { path: 'gk-fs-ui.txt.bak' } }).catch(() => {})`);
 
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
