@@ -2311,6 +2311,7 @@ const ACTIONS = {
     'notif-enable': () => enableNotifications(),
     'sessions-refresh': () => loadServerSessions(),
     'session-kill': (node) => killServerSession(node.dataset.tab),
+    'force-update': () => forceUpdateApp(),
     'reset-settings': () => resetSettings(),
     'lock': () => { closeMobileMore(); lockSession(); },
     'help': () => { closeMobileMore(); openHelp(); },
@@ -3037,12 +3038,57 @@ function uploadToCurrentFilesFolder(fileList) {
 
 /* ─────────────── PWA ─────────────── */
 
+let swHadController = false;
+
 function registerSW() {
     try {
-        if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
-            navigator.serviceWorker.register('sw.js').catch(() => {});
+        if (!('serviceWorker' in navigator) || window.location.protocol === 'file:') return;
+        swHadController = !!navigator.serviceWorker.controller;
+        navigator.serviceWorker.register('sw.js').then((reg) => {
+            if (reg && typeof reg.update === 'function') { try { reg.update(); } catch (e) {} }
+        }).catch(() => {});
+        if (!registerSW._wired) {
+            registerSW._wired = true;
+            navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
         }
     } catch (e) {}
+}
+
+/* 5.6.1 — A new worker took control (sw.js: skipWaiting + clients.claim). The
+   page in memory is still the OLD build, and the SW answers static requests
+   cache-first — so a deploy kept showing stale CSS/JS until the user happened
+   to fully reload. That is why fixes could ship while the UI looked unchanged.
+   Reload once per build so updates actually land. */
+function handleSwUpdate() {
+    try {
+        if (!swHadController) return;                              // first install: nothing stale yet
+        if (!navigator.serviceWorker.controller) return;
+        if (storeGet('gk_sw_reload', '') === APP_VERSION) return;  // already refreshed for this build
+        storeSet('gk_sw_reload', APP_VERSION);
+    } catch (e) { return; }
+    showToastSafe('info', 'Update installed', `Reloading to v${APP_VERSION}…`);
+    setTimeout(reloadAppNow, 1200);
+}
+
+function reloadAppNow() { try { window.location.reload(); } catch (e) {} }
+
+/* Manual escape hatch (Settings → “Check for updates”): drop the service worker
+   and every cache, then reload — guaranteed fresh even if an old build is stuck. */
+async function forceUpdateApp() {
+    showToast({ type: 'info', title: 'Checking for updates…', duration: 2000 });
+    try {
+        if (navigator.serviceWorker && typeof navigator.serviceWorker.getRegistrations === 'function') {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all((regs || []).map((r) => { try { return r.unregister(); } catch (e) { return null; } }));
+        }
+    } catch (e) {}
+    try {
+        if (window.caches && typeof caches.keys === 'function') {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+    } catch (e) {}
+    reloadAppNow();
 }
 
 /* ─────────────── Theme change hook for viewer select ─────────────── */

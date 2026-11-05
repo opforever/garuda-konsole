@@ -1469,6 +1469,74 @@ function visible(win, id) {
     check('client journal POST wired (cat/kind/title)', ev(win, `window.__todayPosted && window.__todayPosted.cat === 'cmd' && window.__todayPosted.title === 'echo stub-test'`));
     await ev(win, `window.__restoreTodayFetch(); closeTodayModal();`);
 
+    /* ── 5.6.1: idle controls readable on every engine + updates actually land ──
+       Regression: the 5.1.4 affordance blend used CSS color-mix(); engines
+       without it fell back to --text-dim — the literal "still grayed out"
+       report. The idle color is now computed by the theme engine (--text-btn),
+       and a deploy can no longer be masked by a cache-first service worker. */
+    console.log('── 5.6.1: idle controls readable on every engine ──');
+    rwin.eval(`
+        window.__contrast = function (a, b) {
+            const toRgb = (h) => { h = String(h).trim().replace('#', ''); if (h.length === 3) h = h.split('').map((c) => c + c).join(''); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); };
+            const L = (h) => { const c = toRgb(h).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+            const s = [L(a), L(b)].sort((x, y) => y - x);
+            return (s[0] + 0.05) / (s[1] + 0.05);
+        };
+    `);
+    const readVar = (name) => String(ev(rwin, `document.documentElement.style.getPropertyValue('${name}')`)).trim();
+    const btnC = readVar('--text-btn'), bgC = readVar('--bg'), dimC = readVar('--text-dim');
+    check('theme engine computes --text-btn (no color-mix needed)', /^#[0-9a-f]{6}$/i.test(btnC), btnC);
+    check('idle control contrast is readable on the active theme (>=4.5:1)', ev(rwin, `window.__contrast('${btnC}', '${bgC}')`) >= 4.5, `${btnC} on ${bgC}`);
+    check('idle controls are brighter than the disabled --text-dim', ev(rwin, `window.__contrast('${btnC}', '${bgC}')`) > ev(rwin, `window.__contrast('${dimC}', '${bgC}')`), `${dimC} vs ${btnC}`);
+    ev(rwin, `window.__prevTheme = getActiveThemeId(); applyTheme('github_light');`);
+    await tick(80);
+    const btnL = readVar('--text-btn'), bgL = readVar('--bg');
+    check('idle control contrast holds on light themes (>=4.5:1)', ev(rwin, `window.__contrast('${btnL}', '${bgL}')`) >= 4.5, `${btnL} on ${bgL}`);
+    ev(rwin, `applyTheme(window.__prevTheme);`);
+    await tick(60);
+    check('settings shows the running build (stale-client telltale)', String(ev(rwin, `document.getElementById('app-version-stamp').textContent || ''`)).includes(String(ev(rwin, 'APP_VERSION'))));
+
+    /* a deploy must reach the browser: new worker build → one reload */
+    console.log('── 5.6.1: worker updates trigger a reload ──');
+    rwin.eval(`
+        window.__reloads = 0;
+        window.__origReloadNow = reloadAppNow;
+        reloadAppNow = function () { window.__reloads++; };
+        window.__swEvents = {};
+        const swStub = {
+            controller: { state: 'activated' },
+            register: async () => ({ update: async () => { window.__updateCalled = true; } }),
+            getRegistrations: async () => [{ unregister: async () => { window.__unreg = (window.__unreg || 0) + 1; } }],
+            addEventListener: (ev, cb) => { window.__swEvents[ev] = cb; }
+        };
+        Object.defineProperty(window.navigator, 'serviceWorker', { value: swStub, configurable: true });
+        storeSet('gk_sw_reload', '');
+        registerSW._wired = false;
+        registerSW();
+    `);
+    await tick(80);
+    check('registration triggers an update check', ev(rwin, 'window.__updateCalled') === true);
+    check('controllerchange listener wired', ev(rwin, `typeof window.__swEvents.controllerchange === 'function'`));
+    ev(rwin, `window.__swEvents.controllerchange && window.__swEvents.controllerchange()`);
+    await tick(1400);
+    check('new worker build schedules a reload (deploy actually lands)', ev(rwin, 'window.__reloads') === 1);
+    check('reload recorded per build (no reload loop)', ev(rwin, `storeGet('gk_sw_reload', '')`) === ev(rwin, 'APP_VERSION'));
+    ev(rwin, `window.__swEvents.controllerchange()`);
+    await tick(1400);
+    check('duplicate controllerchange does not reload again', ev(rwin, 'window.__reloads') === 1);
+
+    /* manual escape hatch: Settings → Check for updates */
+    rwin.eval(`
+        window.__deleted = []; window.__unreg = 0;
+        window.caches = { keys: async () => ['garuda-konsole-v1', 'other'], delete: async (k) => { window.__deleted.push(k); return true; } };
+    `);
+    await ev(rwin, 'forceUpdateApp()');
+    await tick(150);
+    check('force update unregisters the service worker', ev(rwin, 'window.__unreg') >= 1);
+    check('force update clears every cache', String(ev(rwin, 'window.__deleted.join(",")')).includes('garuda-konsole-v1'));
+    check('force update reloads fresh', ev(rwin, 'window.__reloads') === 2);
+    ev(rwin, `reloadAppNow = window.__origReloadNow;`);
+
     /* ── 16. No stray console errors ── */
     console.log('── Runtime hygiene ──');
     const relevant = fatalErrors.filter((e) => !/Could not load|favicon|Not implemented|blob:fake/i.test(e));

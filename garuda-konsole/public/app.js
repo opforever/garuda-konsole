@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.6.0';
+const APP_VERSION = '5.6.1';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -496,6 +496,14 @@ function applyThemeToCssVars(themeData) {
     root.style.setProperty('--text', fg);
     root.style.setProperty('--text-dim', mixColors(fg, bg, 0.62));
     root.style.setProperty('--text-faint', mixColors(fg, bg, 0.4));
+    /* 5.6.1 — idle interactive color, computed HERE (not with CSS color-mix()).
+       color-mix() is unsupported in older WebViews/engines, which silently fell
+       back to --text-dim — the exact "grayed out" look users kept reporting.
+       A plain variable works everywhere, on every built-in and custom theme:
+       buttons sit ~16% toward the background (clearly readable), inactive tabs
+       a bit calmer at ~32%. */
+    root.style.setProperty('--text-btn', mixColors(fg, bg, isLight ? 0.12 : 0.16));
+    root.style.setProperty('--text-tab', mixColors(fg, bg, isLight ? 0.28 : 0.34));
     root.style.setProperty('--accent', accent);
     root.style.setProperty('--accent-2', accent2);
     root.style.setProperty('--accent-soft', rgba(accent, isLight ? 0.14 : 0.13));
@@ -2953,6 +2961,9 @@ function changeFontSizeTo(size) {
 function applySettingsAll() {
     const s = getSettings();
     document.body.classList.toggle('reduce-motion', !!s.reducedMotion);
+    /* 5.6.1: show the running build so a stale cached client is obvious at a glance. */
+    const stamp = $('app-version-stamp');
+    if (stamp) stamp.textContent = `running build v${APP_VERSION} · ${(serverMeta && serverMeta.version) ? 'server v' + serverMeta.version : ''}`;
     for (const tab of Object.values(tabs)) {
         try {
             tab.term.options.fontFamily = s.fontFamily;

@@ -1,8 +1,8 @@
-# Garuda Konsole 5.6.0 🦅
+# Garuda Konsole 5.6.1 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.6.0-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-520%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.6.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-530%20passing-2fd07a)
 
 ---
 
@@ -196,7 +196,7 @@ Default password: `20090228` (unchanged). Override everything via env:
 
 ## 🧪 Tests
 ```bash
-npm test           # api-test (143) + frontend-test (240) + static-check
+npm test           # api-test (208) + frontend-test (322) + static-check
 ```
 Each suite boots its own isolated server instance — no manual setup needed.
 The AI E2E tests stub `/api/ai/chat` in-page, so they never consume your Groq quota
@@ -225,6 +225,19 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 🩹 What's new in 5.6.1 — “it still looks gray” (it was never the code you were looking at)
+
+Follow-up to the affordance work, after a screenshot of the right-click menu came back **still uniformly dim**.
+
+- **Root cause: stale delivery, not stale CSS.** The 5.1.4 idle colour was a CSS `color-mix()` blend. Engines without `color-mix()` (older Android WebViews, older Safari) silently fell back to `var(--text-dim)` — the exact "grayed out" grey — and a cache-first Service Worker happily kept serving that old stylesheet, so every fix shipped looked like no fix at all.
+- **Idle interactive colour is now computed by the theme engine**, not by CSS: `applyThemeToCssVars()` derives `--text-btn` (≈84% of the theme's own text colour) and `--text-tab`, and the `AFFORDANCE` section just uses `var(--text-btn)`. Zero `color-mix()` dependency, every engine, every built-in + custom theme. Measured on the default dark theme: the old derived dim was `#6d7072` (**3.4:1**, below the 3:1 WCAG minimum for UI parts) — idle controls now sit at **~11.6:1**; light themes **~8.9:1**.
+- **Updates can no longer be masked**: `registerSW()` now runs an update check on every load and, when a new worker takes control (`controllerchange`, once per build, loop-guarded), shows *“Update installed — reloading”* and reloads. The version-busted asset URLs (`?v=`) and cache versioning stay in lockstep — guarded by static checks.
+- **New escape hatch**: Settings → Danger Zone → **Check for updates** unregisters the worker, deletes every cache and reloads — guaranteed fresh even when a client is wedged on an ancient build.
+- **Telltale in the UI**: Settings now prints `running build vX.Y.Z · server vX.Y.Z`, so “am I even running the new version?” is answerable in one glance.
+- Static guards tightened: the affordance section must use `var(--text-btn)` and may not fall back to `color-mix()` in a `color:` declaration.
+
+Tests: frontend **322** (+13: theme-computed colour presence, ≥4.5:1 contrast on dark *and* light themes, brighter-than-disabled, version stamp, update-check wiring, one-reload-per-build, manual force-update cache/SW clearing). Verified red against the 5.6.0 code (4 failures + missing stamp).
 
 ## 🦅 What's new in 5.6 — Garuda Pet & Mission Control
 

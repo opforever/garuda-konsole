@@ -101,7 +101,8 @@ if (affStart === -1 || affEnd === -1 || affEnd < affStart) {
     const mustBrighten = ['.icon-btn', '.btn-ghost', '.btn-mini', '.sb-btn', '.ctx-item', '.pin-chip', '.ai-mode-btn', '.tab'];
     const notCovered = mustBrighten.filter((c) => !aff.includes(c));
     if (notCovered.length) fail('affordance section missing idle-brighten for: ' + notCovered.join(', '));
-    else if (!/color-mix\(in srgb, var\(--text\)/.test(aff)) fail('affordance section lost the theme-aware color-mix blend');
+    else if (!/var\(--text-btn/.test(aff)) fail('affordance section lost the theme-aware --text-btn binding');
+    else if (/color:\s*color-mix\(/.test(aff)) fail('affordance section fell back to color-mix() (unsupported on older engines)');
     else if (!/button:disabled/.test(aff) || !/not-allowed/.test(aff)) fail('affordance section lost the disabled-state styling');
     else ok('enabled controls out-bright the disabled look (affordance section intact)');
 }
