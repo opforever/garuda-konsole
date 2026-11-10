@@ -7,7 +7,7 @@
 
 /* ─────────────── Constants ─────────────── */
 
-const APP_VERSION = '5.6.1';
+const APP_VERSION = '5.6.2';
 const K = {
     token: 'gk_token',
     tabs: 'gk_tabs_v3',
@@ -411,6 +411,36 @@ function mixColors(hex1, hex2, w) {
 }
 function lighten(hex, w) { return mixColors(hex, '#ffffff', w); }
 function darken(hex, w) { return mixColors(hex, '#000000', w); }
+
+/* UI controls must remain legible even when a terminal palette intentionally
+   uses subdued text. Calculate this once per theme change, not per frame.
+   Compare against the actual control surfaces, not just the terminal's bg. */
+function controlContrast(foreground, background) {
+    const luminance = (hex) => {
+        const c = hexToRgb(hex);
+        if (!c) return 0;
+        const linear = (v) => {
+            v /= 255;
+            return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b);
+    };
+    const a = luminance(foreground), b = luminance(background);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+function readableControlText(foreground, surfaces) {
+    const text = hexToRgb(foreground) ? foreground : '#e8edf4';
+    const backgrounds = surfaces.filter((s) => hexToRgb(s));
+    const minimum = (color) => Math.min(...backgrounds.map((s) => controlContrast(color, s)));
+    if (minimum(text) >= 4.6) return text;
+    const target = minimum('#ffffff') >= minimum('#000000') ? '#ffffff' : '#000000';
+    for (let step = 1; step <= 20; step++) {
+        const candidate = mixColors(text, target, step / 20);
+        if (minimum(candidate) >= 4.6) return candidate;
+    }
+    return target;
+}
+
 function rgba(hex, alpha) {
     const c = hexToRgb(hex);
     if (!c) return hex;
@@ -485,25 +515,28 @@ function applyThemeToCssVars(themeData) {
     const luminance = (0.299 * bgRgb.r + 0.587 * bgRgb.g + 0.114 * bgRgb.b) / 255;
     const isLight = luminance > 0.55;
 
+    const surfaceSolid = isLight ? mixColors(bg, '#ffffff', 0.4) : lighten(bg, 0.05);
+    const surface2 = isLight ? darken(bg, 0.028) : lighten(bg, 0.08);
+    const surface3 = isLight ? darken(bg, 0.075) : lighten(bg, 0.14);
+    const controlSurfaces = [bg, surfaceSolid, surface2, surface3];
+
     root.style.setProperty('--bg', bg);
     root.style.setProperty('--bg-deep', isLight ? darken(bg, 0.045) : darken(bg, 0.35));
     root.style.setProperty('--surface', isLight ? rgba(mixColors(bg, '#ffffff', 0.55), 0.85) : rgba(lighten(bg, 0.05), 0.78));
-    root.style.setProperty('--surface-solid', isLight ? mixColors(bg, '#ffffff', 0.4) : lighten(bg, 0.05));
-    root.style.setProperty('--surface-2', isLight ? darken(bg, 0.028) : lighten(bg, 0.08));
-    root.style.setProperty('--surface-3', isLight ? darken(bg, 0.075) : lighten(bg, 0.14));
+    root.style.setProperty('--surface-solid', surfaceSolid);
+    root.style.setProperty('--surface-2', surface2);
+    root.style.setProperty('--surface-3', surface3);
     root.style.setProperty('--border', isLight ? 'rgba(20, 30, 50, 0.13)' : rgba(mixColors(fg, bg, 0.5), 0.14));
     root.style.setProperty('--border-strong', rgba(accent, isLight ? 0.5 : 0.4));
     root.style.setProperty('--text', fg);
     root.style.setProperty('--text-dim', mixColors(fg, bg, 0.62));
     root.style.setProperty('--text-faint', mixColors(fg, bg, 0.4));
-    /* 5.6.1 — idle interactive color, computed HERE (not with CSS color-mix()).
-       color-mix() is unsupported in older WebViews/engines, which silently fell
-       back to --text-dim — the exact "grayed out" look users kept reporting.
-       A plain variable works everywhere, on every built-in and custom theme:
-       buttons sit ~16% toward the background (clearly readable), inactive tabs
-       a bit calmer at ~32%. */
-    root.style.setProperty('--text-btn', mixColors(fg, bg, isLight ? 0.12 : 0.16));
-    root.style.setProperty('--text-tab', mixColors(fg, bg, isLight ? 0.28 : 0.34));
+    /* No dimmed idle state or color-mix() compatibility fallback for actions.
+       Preserve the theme foreground when readable; lift only control text in
+       low-contrast palettes. The terminal foreground itself is unchanged. */
+    root.style.setProperty('--text-btn', readableControlText(fg, controlSurfaces));
+    root.style.setProperty('--text-tab', readableControlText(mixColors(fg, bg, 0.18), controlSurfaces));
+    root.style.setProperty('--action-icon', readableControlText(accent, controlSurfaces));
     root.style.setProperty('--accent', accent);
     root.style.setProperty('--accent-2', accent2);
     root.style.setProperty('--accent-soft', rgba(accent, isLight ? 0.14 : 0.13));

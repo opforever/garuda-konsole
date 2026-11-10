@@ -115,9 +115,9 @@ if (ctxStart === -1 || ctxEnd === -1 || ctxEnd < ctxStart) {
     fail('context-menu affordance section missing in style.css (CTX-AFFORDANCE:START/END markers)');
 } else {
     const seg = css.slice(ctxStart, ctxEnd);
-    if (!/\.ctx-item\s*{\s*color:\s*var\(--text\);\s*\}/.test(seg)) fail('ctx-item must idle at the full theme text color (no color-mix dependency)');
+    if (!/\.ctx-item\s*{\s*color:\s*var\(--text-btn,\s*var\(--text\)\);\s*\}/.test(seg)) fail('ctx-item must use readable control text with a full-text fallback');
     else if (!/\.ctx-item\.danger\s*{\s*color:\s*var\(--danger\);\s*\}/.test(seg)) fail('danger ctx-item idle tint missing');
-    else ok('context menu idles crisp: enabled full-text, danger tinted (5.1.6 section intact)');
+    else ok('context menu uses readable control text and preserves danger semantics');
 }
 if (!/btn\.disabled\s*=\s*true/.test(uijs)) fail('openCtxMenu must make inert entries natively disabled (btn.disabled = true)');
 else if (/btn\.style\.opacity\s*=\s*'0\.4'/.test(uijs)) fail('openCtxMenu must not fake disabled with inline opacity hacks');

@@ -1,8 +1,8 @@
-# Garuda Konsole 5.6.1 🦅
+# Garuda Konsole 5.6.2 🦅
 
 A complete web terminal **command center** — persistent shells, an **AI agent that runs commands for you**, split panes, session replay, output triggers, live chat, file management and system monitoring, wrapped in a themed glass-neon UI that works beautifully on phones.
 
-![version](https://img.shields.io/badge/version-5.6.1-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/tests-530%20passing-2fd07a)
+![version](https://img.shields.io/badge/version-5.6.2-3daee9) ![node](https://img.shields.io/badge/node-%3E%3D18-2fd07a) ![tests](https://img.shields.io/badge/browser%20UI-25%20passing-2fd07a)
 
 ---
 
@@ -225,6 +225,39 @@ The big one: a **Remote Desktop drawer** that streams this machine's screen into
 Setup on the host: `sh tools/rd-setup.sh` once (ydotoold + gstreamer), then `export GK_RD_CAPTURE_CMD="sh tools/rd-screencast-kwin.sh"`, restart the server, palette → *Remote Desktop: connect*. Verify anytime: `node tools/verify-rd.js` (8-point Chromium check incl. mobile layout).
 
 Tests: +8 API (status/auth/WS auth-reject/meta/stream bytes/echo round-trip against a fixture-capture server), +7 frontend E2E, static guards (WS branch, fixture presence). Suite: **API 186, frontend 272**.
+
+## 5.6.2 — readable controls, verified in Chromium
+
+The earlier CSS-presence checks were not visual tests. This release adds
+**real-browser checks of rendered controls**, using the actual stylesheet,
+theme engine and context-menu builder. It also tests a real service worker
+with an intentionally stale stylesheet in its cache.
+
+- Enabled controls start from the full theme foreground, not a dimmed blend.
+  For low-contrast palettes, only the UI control color is adjusted to reach
+  at least 4.5:1 against the actual menu/button surfaces; terminal colors stay
+  unchanged. No `color-mix()` support is required.
+- Right-click menus use an opaque surface, readable shortcut labels and
+  accent-colored action icons. Only genuinely disabled entries fade. Disabled
+  entries no longer acquire enabled hover styling; keyboard focus is visible.
+- Read-aloud/download controls no longer idle at 45% opacity.
+- Local CSS/JS requests are network-first with a last-known-good offline/error
+  fallback, so a successful online reload does not show stale cached styling.
+  Release-specific asset URLs and the service-worker version are also bumped.
+
+```bash
+npm ci
+npx playwright install chromium   # one-time browser setup
+npm run test:browser
+# Or use an existing browser:
+CHROMIUM_PATH=/usr/bin/chromium npm run test:browser
+```
+
+The 25 browser checks cover desktop and touch viewports, unsupported
+`color-mix()` declarations, all 26 built-in palettes plus two custom palettes,
+actual disabled/click/keyboard behavior, and online/offline stylesheet delivery.
+They do not require a Groq key, a terminal backend, or external CDN access.
+The existing API/jsdom/static suites remain available through `npm test`.
 
 ## 🩹 What's new in 5.6.1 — “it still looks gray” (it was never the code you were looking at)
 

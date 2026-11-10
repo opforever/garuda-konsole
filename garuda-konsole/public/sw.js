@@ -3,16 +3,16 @@
    notifications even with the browser fully closed. */
 'use strict';
 
-const CACHE = 'garuda-konsole-v5.6.1';
+const CACHE = 'garuda-konsole-v5.6.2';
 const SHELL = [
     '/',
     '/index.html',
     /* Versioned asset URLs: a stale service worker from an older release can
        never have these in cache, so the first load after a deploy fetches the
        fresh CSS/JS from the network instead of resurrecting old styles. */
-    '/style.css?v=5.6.1',
-    '/app.js?v=5.6.1',
-    '/ui.js?v=5.6.1',
+    '/style.css?v=5.6.2',
+    '/app.js?v=5.6.2',
+    '/ui.js?v=5.6.2',
     '/manifest.webmanifest',
     '/replay.html',
     '/fs.html',
@@ -64,7 +64,29 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // Cache-first for static assets & CDN libs, refreshing the cache in the background
+    /* App code/styles are network-first. A cache-first stylesheet can keep
+       drawing the old dim controls on the very reload meant to install a fix.
+       Keep a last-known-good copy for offline use and temporary server errors;
+       never replace it with an error page. CDN libraries remain cache-first. */
+    if (url.origin === self.location.origin && /^\/(style\.css|app\.js|ui\.js)$/.test(url.pathname)) {
+        event.respondWith((async () => {
+            const cache = await caches.open(CACHE).catch(() => null);
+            const cached = () => cache ? cache.match(req).catch(() => null) : Promise.resolve(null);
+            try {
+                const response = await fetch(req, { cache: 'no-cache' });
+                if (response.ok) {
+                    try { if (cache) await cache.put(req, response.clone()); } catch (e) { /* storage unavailable/full */ }
+                    return response;
+                }
+                return (await cached()) || response;
+            } catch (e) {
+                return (await cached()) || Response.error();
+            }
+        })());
+        return;
+    }
+
+    // Cache-first for other static assets & CDN libs, refreshing in the background
     event.respondWith(
         caches.match(req).then((cached) => {
             const network = fetch(req)
